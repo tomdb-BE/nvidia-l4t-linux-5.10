@@ -311,6 +311,96 @@ struct qcmdset macronix_cmd_info_table[OPERATION_MAX_LIMIT] = {
 	},
 };
 
+struct qcmdset gd25lt512_cmd_info_table[OPERATION_MAX_LIMIT] = {
+	/*  NORMAL_READ */
+	{ {.op_code = 0x13, .is_ddr = FALSE, .bus_width = X1, .post_txn = 2},
+		{.address = 0, .is_ddr = FALSE, .len = 4,
+			.bus_width = X1, .dummy_cycles = 0},
+		{.is_ddr = FALSE, .bus_width = X1}
+	},
+	/*  FAST_READ */
+	{ {.op_code = 0x0c, .is_ddr = FALSE, .bus_width = X1, .post_txn = 2},
+		{.address = 0, .is_ddr = FALSE, .len = 4,
+			.bus_width = X1, .dummy_cycles = 8},
+		{.is_ddr = FALSE, .bus_width = X1}
+	},
+	/*INVALID DUAL_OUT_READ */
+	{
+	},
+	/* QUAD_OUT_READ */
+	{ {.op_code = 0x6c, .is_ddr = FALSE, .bus_width = X1, .post_txn = 2},
+		{.address = 0, .is_ddr = FALSE, .len = 4,
+			.bus_width = X1, .dummy_cycles = 8},
+		{.is_ddr = FALSE, .bus_width = X4}
+	},
+	/*INVALID DUAL_IO_READ */
+	{
+	},
+	/* QUAD_IO_READ */
+	{ {.op_code = 0xec, .is_ddr = FALSE, .bus_width = X1, .post_txn = 2},
+		{.address = 0, .is_ddr = FALSE, .len = 4,
+			.bus_width = X4, .dummy_cycles = 64},
+		{.is_ddr = FALSE, .bus_width = X4}
+	},
+	/*INVALID DDR_FAST_READ */
+	{
+	},
+	/*INVALID DDR_DUAL_IO_READ */
+	{
+	},
+	/* DDR_QUAD_IO_READ */
+	{ {.op_code = 0xee, .is_ddr = FALSE, .bus_width = X1, .post_txn = 2},
+		{.address = 0, .is_ddr = TRUE, .len = 4,
+			.bus_width = X4, .dummy_cycles = 128},
+		{.is_ddr = TRUE, .bus_width = X4}
+	},
+	/* PAGE_PROGRAM */
+	{ {.op_code = 0x12, .is_ddr = FALSE, .bus_width = X1, .post_txn = 2},
+		{.address = 0, .is_ddr = FALSE, .len = 4,
+			.bus_width = X1, .dummy_cycles = 0},
+		{.is_ddr = FALSE, .bus_width = X1}
+	},
+	/* QUAD_PAGE_PROGRAM */
+	{ {.op_code = 0x34, .is_ddr = FALSE, .bus_width = X1, .post_txn = 2},
+		{.address = 0, .is_ddr = FALSE, .len = 4,
+			.bus_width = X1, .dummy_cycles = 0},
+		{.is_ddr = FALSE, .bus_width = X4}
+	},
+	/*INVALID QPI_PAGE_PROGRAM */
+	{
+	},
+	/* READ ID */
+	{ {.op_code = 0x9f, .is_ddr = FALSE, .bus_width = X1, .post_txn = 1},
+		{.address = 0, .is_ddr = FALSE, .len = 0,
+			.bus_width = X1, .dummy_cycles = 0},
+		{.is_ddr = FALSE, .bus_width = X1}
+	},
+	/* ERASE SECT */
+	{ {.op_code = 0xdc, .is_ddr = FALSE, .bus_width = X1, .post_txn = 1},
+		{.address = 0, .is_ddr = FALSE, .len = 4,
+			.bus_width = X1, .dummy_cycles = 0},
+		{.is_ddr = FALSE, .bus_width = X1}
+	},
+	/*  bulk erase */
+	{ {.op_code = 0x60, .is_ddr = FALSE, .bus_width = X1, .post_txn = 0},
+		{.address = 0, .is_ddr = FALSE, .len = 0,
+			.bus_width = X1, .dummy_cycles = 0},
+		{.is_ddr = FALSE, .bus_width = X1}
+	},
+	/* STATUS READ */
+	{ {.op_code = 0x05, .is_ddr = FALSE, .bus_width = X1, .post_txn = 1},
+		{.address = 0, .is_ddr = FALSE, .len = 0,
+			.bus_width = X1, .dummy_cycles = 0},
+		{.is_ddr = FALSE, .bus_width = X1}
+	},
+	/*INVALID READ_ANY_REG */
+	{
+	},
+	/*INVALID WRITE_ANY_REG */
+	{
+	},
+};
+
 
 struct qcmdset macronix_porg_cmd_info_table[OPERATION_MAX_LIMIT] = {
 	/*  NORMAL_READ */
@@ -517,6 +607,9 @@ static const struct spi_device_id qspi_ids[] = {
 	},
 	{	"MX25U51279G",
 		INFO(0xC2953A, 0, 64 * 1024, 1024, 0, 0, 0, 0, 256, 0)
+	},
+	{	"gd25lt512",
+		INFO(0xC8661A, 0, 64 * 1024, 1024, 0, 0, 0, 0, 256, 0)
 	},
 	{	"MX25U3235F",
 		INFO(0xC22536, 0, 4 * 1024, 1024, 0, 0, 0, 0, 256, 0)

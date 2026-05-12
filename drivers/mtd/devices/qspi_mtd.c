@@ -65,6 +65,7 @@
 #define WRITE_ENABLE_SLEEP_TIME			10
 #define WIP_ENABLE_WAIT_TIME			10
 #define WIP_ENABLE_SLEEP_TIME			50
+#define GD25LT512_RESET_WAIT_TIME		40
 #define BITS8_PER_WORD				8
 #define BITS16_PER_WORD				16
 #define BITS32_PER_WORD				32
@@ -80,11 +81,28 @@
 #define CR3V_512PAGE_SIZE			(1<<4)
 #define RDCR_DUMMY_CYCLE			(3<<6)
 #define STATUS_BLOCK_PROT			(0xF << 2)
+#define GD25LT512_STATUS_BLOCK_PROT		(0x1F << 2)
 
 #define JEDEC_ID_S25FX512S	0x010220
 #define JEDEC_ID_S25FS256S	0x010219
 #define JEDEC_ID_MX25U51279G	0xC2953A
 #define JEDEC_ID_MX25U3235F	0xC22536
+#define JEDEC_ID_GD25LT512	0xC8661A
+#define GD25LT512_ENABLE_RESET	0x66
+#define GD25LT512_RESET		0x99
+
+static bool qspi_is_gd25lt512(const struct flash_info *info)
+{
+	return info->jedec_id == JEDEC_ID_GD25LT512;
+}
+
+static uint8_t qspi_block_prot_mask(struct qspi *flash)
+{
+	if (qspi_is_gd25lt512(flash->flash_info))
+		return GD25LT512_STATUS_BLOCK_PROT;
+
+	return STATUS_BLOCK_PROT;
+}
 
 static int qspi_write_en(struct qspi *flash,
 		uint8_t is_enable, uint8_t is_sleep);
@@ -99,6 +117,43 @@ static void set_mode(struct spi_transfer *tfr, uint8_t is_ddr,
 static inline struct qspi *mtd_to_qspi(struct mtd_info *mtd)
 {
 	return container_of(mtd, struct qspi, mtd);
+}
+
+static int gd25lt512_reset(struct qspi *flash)
+{
+	struct spi_transfer t;
+	struct spi_message m;
+	u8 cmd;
+	int err;
+	int i;
+
+	for (i = 0; i < 2; i++) {
+		cmd = i ? GD25LT512_RESET : GD25LT512_ENABLE_RESET;
+
+		spi_message_init(&m);
+		memset(&t, 0, sizeof(t));
+		t.len = COMMAND_WIDTH;
+		t.tx_buf = &cmd;
+		t.bits_per_word = BITS8_PER_WORD;
+		set_mode(&t, FALSE, X1, cmd);
+		spi_message_add_tail(&t, &m);
+
+		err = spi_sync(flash->spi, &m);
+		if (err < 0) {
+			dev_err(&flash->spi->dev,
+				"command 0x%x failed %d\n", cmd, err);
+			return err;
+		}
+	}
+
+	udelay(GD25LT512_RESET_WAIT_TIME);
+	flash->curr_cmd_mode = X1;
+	flash->is_quad_set = FALSE;
+#ifdef QSPI_BRINGUP_BUILD
+	flash->enable_qpi_mode = FALSE;
+#endif
+
+	return 0;
 }
 
 #ifdef QSPI_BRINGUP_BUILD
@@ -257,11 +312,18 @@ static ssize_t enable_qpi_mode_set(struct device *dev,
 	struct qspi *flash = dev_get_drvdata(dev);
 
 	if (flash && count) {
-		flash->enable_qpi_mode = ((buf[0] - '0') > 0);
-		if (flash->enable_qpi_mode)
-			qspi_qpi_flag_set(flash, TRUE);
-		else
+		u8 enable_qpi = (buf[0] - '0') > 0;
+
+		if (enable_qpi && qspi_is_gd25lt512(flash->flash_info))
+			return -EOPNOTSUPP;
+
+		flash->enable_qpi_mode = enable_qpi;
+		if (flash->enable_qpi_mode) {
+			if (qspi_qpi_flag_set(flash, TRUE))
+				flash->enable_qpi_mode = FALSE;
+		} else {
 			qspi_qpi_flag_set(flash, FALSE);
+		}
 		return count;
 	}
 
@@ -440,6 +502,15 @@ static void copy_cmd_default(struct qcmdset *qcmd, struct qcmdset *cmd_table)
 	qcmd->qdata.bus_width = cmd_table->qdata.bus_width;
 }
 
+static int qspi_validate_cmd(struct qspi *flash)
+{
+	if (flash->cmd_table.qcmd.op_code)
+		return 0;
+
+	dev_err(&flash->spi->dev, "unsupported qspi command mode\n");
+	return -EOPNOTSUPP;
+}
+
 static int max_enable_4byte(struct qspi *flash)
 {
 	uint8_t tx_buf[1];
@@ -511,7 +582,7 @@ static int read_sr1_reg(struct qspi *flash, uint8_t *regval)
 
 	*regval = rx_buf[0];
 
-	if (WARN_ON(rx_buf[0] & STATUS_BLOCK_PROT))
+	if (WARN_ON(rx_buf[0] & qspi_block_prot_mask(flash)))
 		dev_err(&flash->spi->dev,
 			"block protection enabled %u\n", rx_buf[0]);
 	return status;
@@ -563,11 +634,12 @@ static int qspi_write_status_cfgr_reg(struct qspi *flash, uint8_t sr,
 	struct spi_message m;
 	struct spi_transfer t;
 	uint8_t code = MX_WRSR;
+	u8 block_prot = qspi_block_prot_mask(flash);
 
-	if (WARN_ON(sr & STATUS_BLOCK_PROT)) {
+	if (WARN_ON(sr & block_prot)) {
 		dev_err(&flash->spi->dev,
 			"avoiding block protect bits overwrite %u\n", sr);
-		sr &= ~STATUS_BLOCK_PROT;
+		sr &= ~block_prot;
 	}
 
 	tx_buf[0] = code;
@@ -874,6 +946,16 @@ static int qspi_quad_flag_set(struct qspi *flash, uint8_t is_set)
 		(!flash->is_quad_set && !is_set)) {
 		return status;
 	}
+
+	if (qspi_is_gd25lt512(flash->flash_info)) {
+		/*
+		 * GD25LT512ME supports Quad SPI commands without the
+		 * Spansion/Macronix QE-bit register sequences used below.
+		 */
+		flash->is_quad_set = is_set;
+		return status;
+	}
+
 	if (flash->flash_info->jedec_id == JEDEC_ID_MX25U3235F) {
 		read_sr1_reg(flash, &my_status);
 		if (is_set)
@@ -1354,6 +1436,11 @@ static int qspi_read(struct mtd_info *mtd, loff_t from, size_t len,
 			}
 	}
 #endif
+	err = qspi_validate_cmd(flash);
+	if (err) {
+		mutex_unlock(&flash->lock);
+		return err;
+	}
 
 	/* check if possible to merge cmd and address */
 	if ((flash->cmd_table.qcmd.is_ddr ==
@@ -1533,6 +1620,11 @@ static int qspi_write(struct mtd_info *mtd, loff_t to, size_t len,
 				&flash->cmd_info_table[QPI_PAGE_PROGRAM]);
 	}
 #endif
+	err = qspi_validate_cmd(flash);
+	if (err) {
+		mutex_unlock(&flash->lock);
+		return err;
+	}
 
 	cmd_addr_buf[0] = opcode = flash->cmd_table.qcmd.op_code;
 	if (flash->cmd_table.qaddr.len != 4) {
@@ -1813,6 +1905,7 @@ static int qspi_init(struct qspi *flash)
 	const struct spi_device_id	*id = spi_get_device_id(spi);
 	struct flash_info *info =  (void *)id->driver_data;
 	uint8_t my_status = 0, my_cfg = 0;
+	u8 block_prot = qspi_block_prot_mask(flash);
 
 	dev_dbg(&spi->dev, "%s ENTRY\n", __func__);
 
@@ -1832,10 +1925,30 @@ static int qspi_init(struct qspi *flash)
 		return ret;
 	}
 
+	if (qspi_is_gd25lt512(flash->flash_info)) {
+		if (my_status & WIP_ENABLE) {
+			dev_err(&spi->dev, "flash busy during reset setup\n");
+			return -EBUSY;
+		}
+
+		ret = gd25lt512_reset(flash);
+		if (ret)
+			return ret;
+
+		ret = read_sr1_reg(flash, &my_status);
+		if (ret) {
+			dev_err(&spi->dev,
+				"error: %s RSR1 read failed after reset: Status: x%x ",
+				__func__, ret);
+			return ret;
+		}
+	}
+
 	/* TODO: move cfg read info into flash cmd table */
 	if (flash->flash_info->jedec_id == JEDEC_ID_MX25U51279G)
 		ret = read_max_cfg_reg(flash, &my_cfg);
-	else if (flash->flash_info->jedec_id != JEDEC_ID_MX25U3235F)
+	else if (flash->flash_info->jedec_id != JEDEC_ID_MX25U3235F &&
+		 !qspi_is_gd25lt512(flash->flash_info))
 		ret = qspi_read_any_reg(flash, RWAR_CR1V, &my_cfg);
 	if (ret) {
 		dev_err(&spi->dev,
@@ -1843,10 +1956,13 @@ static int qspi_init(struct qspi *flash)
 			__func__, ret);
 		return ret;
 	}
-	if (my_status & (SR1NV_WRITE_DIS | STATUS_BLOCK_PROT)) {
-		my_status = my_status & ~(SR1NV_WRITE_DIS | STATUS_BLOCK_PROT);
+	if (my_status & (SR1NV_WRITE_DIS | block_prot)) {
+		my_status = my_status & ~(SR1NV_WRITE_DIS | block_prot);
 		dev_warn(&spi->dev, "clearing block protect");
-		qspi_write_status_reg(flash, my_status, my_cfg);
+		if (qspi_is_gd25lt512(flash->flash_info))
+			qspi_write_status_cfgr_reg(flash, my_status, 0, FALSE);
+		else
+			qspi_write_status_reg(flash, my_status, my_cfg);
 		wait_till_ready(flash, FALSE);
 	}
 	/* Set 512 page size when s25fx512s */
@@ -1931,7 +2047,9 @@ static int qspi_probe(struct spi_device *spi)
 		return -ENOMEM;
 
 
-	if (info->jedec_id == JEDEC_ID_MX25U51279G)
+	if (qspi_is_gd25lt512(info))
+		flash->cmd_info_table = gd25lt512_cmd_info_table;
+	else if (info->jedec_id == JEDEC_ID_MX25U51279G)
 		flash->cmd_info_table = macronix_cmd_info_table;
 	else if (info->jedec_id == JEDEC_ID_S25FX512S ||
 					info->jedec_id == JEDEC_ID_S25FS256S)
@@ -2064,9 +2182,10 @@ static int qspi_suspend(struct device *dev)
 
 	dev_dbg(dev, "%s ENTRY\n", __func__);
 
-	/* configuration registers are not supported by macronix */
+	/* Skip CR1V/CR2V save: not applicable to Macronix/GigaDevice parts */
 	if (info->jedec_id == JEDEC_ID_MX25U3235F ||
-	    info->jedec_id == JEDEC_ID_MX25U51279G)
+	    info->jedec_id == JEDEC_ID_MX25U51279G ||
+	    qspi_is_gd25lt512(info))
 		return 0;
 
 	ret = qspi_read_any_reg(flash, RWAR_CR1V, &regval);
@@ -2110,6 +2229,10 @@ static int qspi_resume(struct device *dev)
 			__func__, ret);
 		return ret;
 	}
+
+	/* GD25LT512 has no Spansion-style CR1V/CR2V to restore; */
+	if (qspi_is_gd25lt512(info))
+		return 0;
 
 	ret = qspi_write_any_reg(flash, RWAR_CR1V, flash->rwar_cr1v_value );
 	if (ret) {
