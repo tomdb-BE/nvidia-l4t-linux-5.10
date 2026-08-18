@@ -487,6 +487,15 @@ static irqreturn_t regmap_irq_thread(int irq, void *d)
 		}
 	}
 
+	if (!strcmp(chip->name, "max77620-top")) {
+		dev_warn_ratelimited(map->dev,
+			"MAX77620DBG: raw status=%08x,%08x mask=%08x,%08x active=%08x,%08x\\n",
+			data->status_buf[0], data->status_buf[1],
+			data->mask_buf[0], data->mask_buf[1],
+			data->status_buf[0] & ~data->mask_buf[0],
+			data->status_buf[1] & ~data->mask_buf[1]);
+	}
+
 	/*
 	 * Ignore masked IRQs and ack if we need to; we ack early so
 	 * there is no race between handling and acknowleding the

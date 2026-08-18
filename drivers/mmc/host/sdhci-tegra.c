@@ -2868,6 +2868,13 @@ static int sdhci_tegra_probe(struct platform_device *pdev)
 		goto err_parse_dt;
 
 	tegra_host->instance = of_alias_get_id(pdev->dev.of_node, "sdhci");
+	if (tegra_host->instance < 0 ||
+	    tegra_host->instance >= ARRAY_SIZE(sdmmc_emc_client_id)) {
+		dev_err(&pdev->dev, "invalid or missing SDHCI alias: %d\n",
+			tegra_host->instance);
+		rc = -EINVAL;
+		goto err_parse_dt;
+	}
 
 	host->mmc->caps |= MMC_CAP_WAIT_WHILE_BUSY;
 

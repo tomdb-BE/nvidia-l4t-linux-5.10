@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2021, NVIDIA CORPORATION. All rights reserved.
- */
+  * Copyright (c) 2017-2021, NVIDIA CORPORATION. All rights reserved.
+  */
 
 #include <linux/cpufreq.h>
 #include <linux/dma-mapping.h>
@@ -176,7 +176,30 @@ static unsigned int tegra186_cpufreq_get(unsigned int cpu)
 			if (cluster->info->cpus[core] != policy->cpu)
 				continue;
 
-			freq = (cluster->ref_clk_khz * ndiv) / cluster->div;
+			/*
+			 * Some Tegra186 cores can come online with their EDVD
+			 * request register still containing NDIV == 0. Returning
+			 * zero here makes CPUFREQ_NEED_INITIAL_FREQ_CHECK reject
+			 * the policy completely.
+			 *
+			 * Use the lowest valid BPMP-provided frequency until the
+			 * first target request programs the EDVD register.
+			 */
+			if (!ndiv) {
+				int index = 0;
+
+				while (cluster->table[index].frequency ==
+				       CPUFREQ_ENTRY_INVALID)
+					index++;
+
+				if (cluster->table[index].frequency !=
+				    CPUFREQ_TABLE_END)
+					freq = cluster->table[index].frequency;
+			} else {
+				freq = (cluster->ref_clk_khz * ndiv) /
+				       cluster->div;
+			}
+
 			goto out;
 		}
 	}

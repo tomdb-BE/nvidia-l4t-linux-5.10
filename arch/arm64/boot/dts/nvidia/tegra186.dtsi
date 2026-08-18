@@ -9,11 +9,18 @@
 #include <dt-bindings/reset/tegra186-reset.h>
 #include <dt-bindings/thermal/tegra186-bpmp-thermal.h>
 
+#include "tegra186-a57-cpuidle.dtsi"
+#include "tegra186-denver-cpuidle.dtsi"
 / {
 	compatible = "nvidia,tegra186";
 	interrupt-parent = <&gic>;
 	#address-cells = <2>;
 	#size-cells = <2>;
+
+	cpuidle {
+		compatible = "nvidia,tegra18x-cpuidle";
+		status = "okay";
+	};
 
 	misc@100000 {
 		compatible = "nvidia,tegra186-misc";
@@ -1151,7 +1158,7 @@
 		#iommu-cells = <1>;
 	};
 
-	host1x@13e00000 {
+	host1x: host1x@13e00000 {
 		compatible = "nvidia,tegra186-host1x";
 		reg = <0x0 0x13e00000 0x0 0x10000>,
 		      <0x0 0x13e10000 0x0 0x10000>;
@@ -1159,8 +1166,9 @@
 		interrupts = <GIC_SPI 265 IRQ_TYPE_LEVEL_HIGH>,
 		             <GIC_SPI 263 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "syncpt", "host1x";
-		clocks = <&bpmp TEGRA186_CLK_HOST1X>;
-		clock-names = "host1x";
+		clocks = <&bpmp TEGRA186_CLK_HOST1X>,
+			 <&bpmp TEGRA186_CLK_ACTMON>;
+		clock-names = "host1x", "actmon";
 		resets = <&bpmp TEGRA186_RESET_HOST1X>;
 		reset-names = "host1x";
 
@@ -1534,7 +1542,33 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		cpu@0 {
+		cpu-map {
+			cluster0 {
+				core0 {
+					cpu = <&denver_0>;
+				};
+				core1 {
+					cpu = <&denver_1>;
+				};
+			};
+
+			cluster1 {
+				core0 {
+					cpu = <&cpu_a57_0>;
+				};
+				core1 {
+					cpu = <&cpu_a57_1>;
+				};
+				core2 {
+					cpu = <&cpu_a57_2>;
+				};
+				core3 {
+					cpu = <&cpu_a57_3>;
+				};
+			};
+		};
+
+		denver_0: cpu@0 {
 			compatible = "nvidia,tegra186-denver";
 			device_type = "cpu";
 			i-cache-size = <0x20000>;
@@ -1545,9 +1579,11 @@
 			d-cache-sets = <256>;
 			next-level-cache = <&L2_DENVER>;
 			reg = <0x000>;
+			enable-method = "psci";
+			cpu-idle-states = <&DENVER_C6 &DENVER_C7>;
 		};
 
-		cpu@1 {
+		denver_1: cpu@1 {
 			compatible = "nvidia,tegra186-denver";
 			device_type = "cpu";
 			i-cache-size = <0x20000>;
@@ -1558,9 +1594,11 @@
 			d-cache-sets = <256>;
 			next-level-cache = <&L2_DENVER>;
 			reg = <0x001>;
+			enable-method = "psci";
+			cpu-idle-states = <&DENVER_C6 &DENVER_C7>;
 		};
 
-		cpu@2 {
+		cpu_a57_0: cpu@2 {
 			compatible = "arm,cortex-a57";
 			device_type = "cpu";
 			i-cache-size = <0xC000>;
@@ -1571,9 +1609,11 @@
 			d-cache-sets = <256>;
 			next-level-cache = <&L2_A57>;
 			reg = <0x100>;
+			enable-method = "psci";
+			cpu-idle-states = <&A57_C7>;
 		};
 
-		cpu@3 {
+		cpu_a57_1: cpu@3 {
 			compatible = "arm,cortex-a57";
 			device_type = "cpu";
 			i-cache-size = <0xC000>;
@@ -1584,9 +1624,11 @@
 			d-cache-sets = <256>;
 			next-level-cache = <&L2_A57>;
 			reg = <0x101>;
+			enable-method = "psci";
+			cpu-idle-states = <&A57_C7>;
 		};
 
-		cpu@4 {
+		cpu_a57_2: cpu@4 {
 			compatible = "arm,cortex-a57";
 			device_type = "cpu";
 			i-cache-size = <0xC000>;
@@ -1597,9 +1639,11 @@
 			d-cache-sets = <256>;
 			next-level-cache = <&L2_A57>;
 			reg = <0x102>;
+			enable-method = "psci";
+			cpu-idle-states = <&A57_C7>;
 		};
 
-		cpu@5 {
+		cpu_a57_3: cpu@5 {
 			compatible = "arm,cortex-a57";
 			device_type = "cpu";
 			i-cache-size = <0xC000>;
@@ -1610,6 +1654,8 @@
 			d-cache-sets = <256>;
 			next-level-cache = <&L2_A57>;
 			reg = <0x103>;
+			enable-method = "psci";
+			cpu-idle-states = <&A57_C7>;
 		};
 
 		L2_DENVER: l2-cache0 {

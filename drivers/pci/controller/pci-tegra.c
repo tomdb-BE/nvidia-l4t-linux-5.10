@@ -131,6 +131,21 @@
 #define  AFI_INTR_P2P_ERROR		14
 
 #define AFI_INTR_SIGNATURE	0xbc
+
+/*
+ * Tegra186 AFI sideband messages.
+ * Restored from NVIDIA's downstream 4.9 Tegra PCIe driver.
+ */
+#define AFI_MSG_0			0x190
+#define AFI_MSG_PM_PME_MASK		0x00100010
+#define AFI_MSG_INTX_MASK		0x1f001f00
+#define AFI_MSG_PM_PME0		(1 << 4)
+#define AFI_MSG_PM_PME1		(1 << 20)
+
+#define AFI_MSG_1_0			0x194
+#define AFI_MSG_1_PM_PME_MASK		0x00000010
+#define AFI_MSG_1_INTX_MASK		0x00001f00
+#define AFI_MSG_1_PM_PME		(1 << 4)
 #define AFI_UPPER_FPCI_ADDRESS	0xc0
 #define AFI_SM_INTR_ENABLE	0xc4
 #define  AFI_SM_INTR_INTA_ASSERT	(1 << 0)
@@ -531,6 +546,9 @@ struct tegra_pcie {
 	struct dentry *debugfs;
 };
 
+#define NV_PCIE2_RP_RSR		0x000000a0
+#define NV_PCIE2_RP_RSR_PMESTAT	(1 << 16)
+
 struct tegra_pcie_port {
 	struct tegra_pcie *pcie;
 	struct device_node *np;
@@ -574,6 +592,17 @@ static inline void afi_writel(struct tegra_pcie *pcie, u32 value,
 static inline u32 afi_readl(struct tegra_pcie *pcie, unsigned long offset)
 {
 	return readl(pcie->afi + offset);
+}
+
+static inline void rp_writel(struct tegra_pcie_port *port, u32 value,
+			     unsigned long offset)
+{
+	writel(value, port->base + offset);
+}
+
+static inline u32 rp_readl(struct tegra_pcie_port *port, unsigned long offset)
+{
+	return readl(port->base + offset);
 }
 
 static inline void pads_writel(struct tegra_pcie *pcie, u32 value,
@@ -1179,6 +1208,62 @@ static int tegra_pcie_map_irq(const struct pci_dev *pdev, u8 slot, u8 pin)
 	return irq;
 }
 
+static void tegra_pcie_handle_sb_intr(struct tegra_pcie *pcie)
+{
+	struct tegra_pcie_port *port;
+	u32 mesg;
+
+	/* Ports 0 and 1 */
+	mesg = afi_readl(pcie, AFI_MSG_0);
+
+	if (mesg & AFI_MSG_INTX_MASK) {
+		dev_dbg(pcie->dev,
+			"Legacy INTx interrupt occurred %x on port 0/1\n",
+			mesg);
+	} else if (mesg & AFI_MSG_PM_PME_MASK) {
+		list_for_each_entry(port, &pcie->ports, list) {
+			if ((port->index == 0 && (mesg & AFI_MSG_PM_PME0)) ||
+			    (port->index == 1 && (mesg & AFI_MSG_PM_PME1))) {
+				u32 value = rp_readl(port, NV_PCIE2_RP_RSR);
+
+				value |= NV_PCIE2_RP_RSR_PMESTAT;
+				rp_writel(port, value, NV_PCIE2_RP_RSR);
+				break;
+			}
+		}
+	} else {
+		/*
+		 * W1C acknowledgement for non-INTx/non-PME sideband
+		 * messages, matching NVIDIA's downstream driver.
+		 */
+		afi_writel(pcie, mesg, AFI_MSG_0);
+	}
+
+	if (pcie->soc->num_ports <= 2)
+		return;
+
+	/* Port 2 */
+	mesg = afi_readl(pcie, AFI_MSG_1_0);
+
+	if (mesg & AFI_MSG_1_INTX_MASK) {
+		dev_dbg(pcie->dev,
+			"Legacy INTx interrupt occurred %x on port 2\n",
+			mesg);
+	} else if (mesg & AFI_MSG_1_PM_PME_MASK) {
+		list_for_each_entry(port, &pcie->ports, list) {
+			if (port->index == 2 && (mesg & AFI_MSG_1_PM_PME)) {
+				u32 value = rp_readl(port, NV_PCIE2_RP_RSR);
+
+				value |= NV_PCIE2_RP_RSR_PMESTAT;
+				rp_writel(port, value, NV_PCIE2_RP_RSR);
+				break;
+			}
+		}
+	} else {
+		afi_writel(pcie, mesg, AFI_MSG_1_0);
+	}
+}
+
 static irqreturn_t tegra_pcie_isr(int irq, void *arg)
 {
 	const char *err_msg[] = {
@@ -1204,10 +1289,16 @@ static irqreturn_t tegra_pcie_isr(int irq, void *arg)
 
 	code = afi_readl(pcie, AFI_INTR_CODE) & AFI_INTR_CODE_MASK;
 	signature = afi_readl(pcie, AFI_INTR_SIGNATURE);
-	afi_writel(pcie, 0, AFI_INTR_CODE);
 
-	if (code == AFI_INTR_LEGACY)
+	if (code == AFI_INTR_LEGACY) {
+		tegra_pcie_handle_sb_intr(pcie);
+		afi_writel(pcie, 0, AFI_INTR_CODE);
+		afi_readl(pcie, AFI_INTR_CODE); /* read pushes write */
 		return IRQ_NONE;
+	}
+
+	afi_writel(pcie, 0, AFI_INTR_CODE);
+	afi_readl(pcie, AFI_INTR_CODE); /* read pushes write */
 
 	if (code >= ARRAY_SIZE(err_msg))
 		code = 0;

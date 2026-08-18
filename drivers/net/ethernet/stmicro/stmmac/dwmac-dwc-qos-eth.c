@@ -19,6 +19,7 @@
 #include <linux/mfd/syscon.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
+#include <linux/regulator/consumer.h>
 #include <linux/stmmac.h>
 
 #include "stmmac_platform.h"
@@ -34,6 +35,7 @@ struct tegra_eqos {
 	struct clk *clk_tx;
 	struct clk *clk_rx;
 
+	struct regulator_bulk_data supplies[5];
 	struct gpio_desc *reset;
 };
 
@@ -284,6 +286,8 @@ static void *tegra_eqos_probe(struct platform_device *pdev,
 	eqos->dev = &pdev->dev;
 	eqos->regs = res->addr;
 
+	dev_info(dev, "T186 EQOS: subdriver probe start\n");
+
 	if (!is_of_node(dev->fwnode))
 		goto bypass_clk_reset_gpio;
 
@@ -294,8 +298,11 @@ static void *tegra_eqos_probe(struct platform_device *pdev,
 	}
 
 	err = clk_prepare_enable(eqos->clk_master);
-	if (err < 0)
+	if (err < 0) {
+		dev_err(dev, "T186 EQOS: master_bus enable failed: %d\n", err);
 		goto error;
+	}
+	dev_info(dev, "T186 EQOS: master_bus enabled\n");
 
 	eqos->clk_slave = devm_clk_get(&pdev->dev, "slave_bus");
 	if (IS_ERR(eqos->clk_slave)) {
@@ -306,8 +313,11 @@ static void *tegra_eqos_probe(struct platform_device *pdev,
 	data->stmmac_clk = eqos->clk_slave;
 
 	err = clk_prepare_enable(eqos->clk_slave);
-	if (err < 0)
+	if (err < 0) {
+		dev_err(dev, "T186 EQOS: slave_bus enable failed: %d\n", err);
 		goto disable_master;
+	}
+	dev_info(dev, "T186 EQOS: slave_bus enabled\n");
 
 	eqos->clk_rx = devm_clk_get(&pdev->dev, "rx");
 	if (IS_ERR(eqos->clk_rx)) {
@@ -316,8 +326,11 @@ static void *tegra_eqos_probe(struct platform_device *pdev,
 	}
 
 	err = clk_prepare_enable(eqos->clk_rx);
-	if (err < 0)
+	if (err < 0) {
+		dev_err(dev, "T186 EQOS: RX clock enable failed: %d\n", err);
 		goto disable_slave;
+	}
+	dev_info(dev, "T186 EQOS: RX clock enabled\n");
 
 	eqos->clk_tx = devm_clk_get(&pdev->dev, "tx");
 	if (IS_ERR(eqos->clk_tx)) {
@@ -326,17 +339,55 @@ static void *tegra_eqos_probe(struct platform_device *pdev,
 	}
 
 	err = clk_prepare_enable(eqos->clk_tx);
-	if (err < 0)
+	if (err < 0) {
+		dev_err(dev, "T186 EQOS: TX clock enable failed: %d\n", err);
 		goto disable_rx;
+	}
+	dev_info(dev, "T186 EQOS: TX clock enabled\n");
+
+	/*
+	  * P3636-0001 (Lanai) EQOS/PHY supplies. Keep the enable
+	  * order used by NVIDIA's downstream Tegra186 EQOS driver.
+	  */
+	eqos->supplies[0].supply = "phy_vdd_1v8";
+	eqos->supplies[1].supply = "phy_ovdd_rgmii";
+	eqos->supplies[2].supply = "phy_pllvdd";
+	eqos->supplies[3].supply = "vddio_enet";
+	eqos->supplies[4].supply = "vddio_sys_enet_bias";
+
+	err = devm_regulator_bulk_get(&pdev->dev,
+				       ARRAY_SIZE(eqos->supplies),
+				       eqos->supplies);
+	if (err < 0) {
+		dev_err(dev, "T186 EQOS: regulator get failed: %d\n", err);
+		goto disable_tx;
+	}
+	dev_info(dev, "T186 EQOS: regulators acquired\n");
+
+	err = regulator_bulk_enable(ARRAY_SIZE(eqos->supplies),
+				    eqos->supplies);
+	if (err < 0) {
+		dev_err(dev, "T186 EQOS: regulator enable failed: %d\n", err);
+		goto disable_tx;
+	}
+	dev_info(dev, "T186 EQOS: regulators enabled\n");
 
 	eqos->reset = devm_gpiod_get(&pdev->dev, "phy-reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(eqos->reset)) {
 		err = PTR_ERR(eqos->reset);
-		goto disable_tx;
+		dev_err(dev, "T186 EQOS: PHY reset GPIO get failed: %d\n", err);
+		goto disable_regulators;
 	}
+	dev_info(dev, "T186 EQOS: PHY reset GPIO acquired\n");
 
-	usleep_range(2000, 4000);
+	/*
+	  * P3636-0001 (Lanai) PHY reset timing from NVIDIA's
+	  * downstream Tegra186 EQOS driver.
+	  */
+	usleep_range(10000, 11000);
 	gpiod_set_value(eqos->reset, 0);
+	msleep(224);
+	dev_info(dev, "T186 EQOS: PHY reset sequence complete\n");
 
 	/* MDIO bus was already reset just above */
 	data->mdio_bus_data->needs_reset = false;
@@ -344,6 +395,7 @@ static void *tegra_eqos_probe(struct platform_device *pdev,
 	eqos->rst = devm_reset_control_get(&pdev->dev, "eqos");
 	if (IS_ERR(eqos->rst)) {
 		err = PTR_ERR(eqos->rst);
+		dev_err(dev, "T186 EQOS: MAC reset get failed: %d\n", err);
 		goto reset_phy;
 	}
 
@@ -354,10 +406,13 @@ static void *tegra_eqos_probe(struct platform_device *pdev,
 	usleep_range(2000, 4000);
 
 	err = reset_control_deassert(eqos->rst);
-	if (err < 0)
+	if (err < 0) {
+		dev_err(dev, "T186 EQOS: MAC reset deassert failed: %d\n", err);
 		goto reset_phy;
+	}
 
 	usleep_range(2000, 4000);
+	dev_info(dev, "T186 EQOS: MAC reset complete\n");
 
 bypass_clk_reset_gpio:
 	data->fix_mac_speed = tegra_eqos_fix_speed;
@@ -366,8 +421,12 @@ bypass_clk_reset_gpio:
 	data->sph_disable = 1;
 
 	err = tegra_eqos_init(pdev, eqos);
-	if (err < 0)
+	if (err < 0) {
+		dev_err(dev, "T186 EQOS: tegra_eqos_init failed: %d\n", err);
 		goto reset;
+	}
+
+	dev_info(dev, "T186 EQOS: subdriver probe complete\n");
 
 out:
 	return eqos;
@@ -376,6 +435,9 @@ reset:
 	reset_control_assert(eqos->rst);
 reset_phy:
 	gpiod_set_value(eqos->reset, 1);
+disable_regulators:
+	regulator_bulk_disable(ARRAY_SIZE(eqos->supplies),
+			       eqos->supplies);
 disable_tx:
 	clk_disable_unprepare(eqos->clk_tx);
 disable_rx:
@@ -395,6 +457,8 @@ static int tegra_eqos_remove(struct platform_device *pdev)
 
 	reset_control_assert(eqos->rst);
 	gpiod_set_value(eqos->reset, 1);
+	regulator_bulk_disable(ARRAY_SIZE(eqos->supplies),
+			       eqos->supplies);
 	clk_disable_unprepare(eqos->clk_tx);
 	clk_disable_unprepare(eqos->clk_rx);
 	clk_disable_unprepare(eqos->clk_slave);
@@ -460,13 +524,21 @@ static int dwc_eth_dwmac_probe(struct platform_device *pdev)
 		goto remove_config;
 	}
 
+	dev_info(&pdev->dev, "T186 EQOS: configuring stmmac platform data\n");
 	ret = dwc_eth_dwmac_config_dt(pdev, plat_dat);
-	if (ret)
+	if (ret) {
+		dev_err(&pdev->dev, "T186 EQOS: config_dt failed: %d\n", ret);
 		goto remove;
+	}
 
+	dev_info(&pdev->dev, "T186 EQOS: entering stmmac_dvr_probe\n");
 	ret = stmmac_dvr_probe(&pdev->dev, plat_dat, &stmmac_res);
-	if (ret)
+	if (ret) {
+		dev_err(&pdev->dev, "T186 EQOS: stmmac_dvr_probe failed: %d\n", ret);
 		goto remove;
+	}
+
+	dev_info(&pdev->dev, "T186 EQOS: netdev registered\n");
 
 	return ret;
 

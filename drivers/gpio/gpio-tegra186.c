@@ -511,7 +511,6 @@ static int tegra186_gpio_direction_input(struct gpio_chip *chip,
 	struct tegra_gpio *gpio = gpiochip_get_data(chip);
 	void __iomem *base;
 	u32 value;
-	int ret = 0;
 
 	if (!gpio_is_accessible(gpio, offset))
 		return -EPERM;
@@ -529,11 +528,12 @@ static int tegra186_gpio_direction_input(struct gpio_chip *chip,
 	value &= ~TEGRA186_GPIO_ENABLE_CONFIG_OUT;
 	writel(value, base + TEGRA186_GPIO_ENABLE_CONFIG);
 
-	ret = pinctrl_gpio_direction_input(chip->base + offset);
-	if (ret < 0)
-		dev_err(chip->parent,
-			"Failed to set input direction: %d\n", ret);
-	return ret;
+	/*
+	 * Tegra186 pinmux is configured by MB1. There is no Linux
+	 * Tegra186 pinctrl device for this platform, so do not require
+	 * pinctrl_gpio_direction_input() here.
+	 */
+	return 0;
 }
 
 static int tegra186_gpio_direction_output(struct gpio_chip *chip,
@@ -542,7 +542,6 @@ static int tegra186_gpio_direction_output(struct gpio_chip *chip,
 	struct tegra_gpio *gpio = gpiochip_get_data(chip);
 	void __iomem *base;
 	u32 value;
-	int ret = 0;
 
 	if (!gpio_is_accessible(gpio, offset))
 		return -EPERM;
@@ -563,12 +562,12 @@ static int tegra186_gpio_direction_output(struct gpio_chip *chip,
 	value |= TEGRA186_GPIO_ENABLE_CONFIG_ENABLE;
 	value |= TEGRA186_GPIO_ENABLE_CONFIG_OUT;
 	writel(value, base + TEGRA186_GPIO_ENABLE_CONFIG);
-	ret = pinctrl_gpio_direction_output(chip->base + offset);
-
-	if (ret < 0)
-		dev_err(chip->parent,
-			"Failed to set output direction: %d\n", ret);
-	return ret;
+	/*
+	 * Tegra186 pinmux is configured by MB1. There is no Linux
+	 * Tegra186 pinctrl device for this platform, so do not require
+	 * pinctrl_gpio_direction_output() here.
+	 */
+	return 0;
 }
 
 static int tegra_gpio_suspend_configure(struct gpio_chip *chip, unsigned offset,

@@ -1,0 +1,213 @@
+// SPDX-License-Identifier: GPL-2.0
+
+/dts-v1/;
+
+
+#include "tegra186.dtsi"
+
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/mfd/max77620.h>
+
+/ {
+	model = "NVIDIA Tegra186 P3636-0002 (Lanai)";
+	compatible = "nvidia,lanai",
+		     "nvidia,p3636-0002-lanai",
+		     "nvidia,tegra186";
+
+	aliases {
+		serial0 = &uarta;
+	};
+
+	chosen {
+		bootargs = "earlycon console=ttyS0,115200n8";
+		stdout-path = "serial0:115200n8";
+	};
+
+	/*
+	 * Preserve the memory description from NVIDIA's original
+	 * P3636-0002 board DTS for the first bring-up.
+	 */
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x70000000>;
+	};
+};
+
+&uarta {
+	status = "okay";
+};
+
+/*
+ * MAX77620 on Tegra186 BPMP I2C bus.
+ *
+ * For the initial NVMe bring-up we describe only the PMIC rails
+ * required by PCIe:
+ *
+ *   SD1  = 1.2 V, upstream supply for LDO7/8
+ *   SD2  = 1.8 V, PCIe HVDD / PLL / IO
+ *   LDO7 = 1.0 V, PCIe DVDD
+ *
+ * These values come from NVIDIA's P3636 board DTS rather than
+ * the P3310/TX2 regulator assignments.
+ */
+&bpmp_i2c {
+	status = "okay";
+
+	spmic: pmic@3c {
+		compatible = "maxim,max77620";
+		reg = <0x3c>;
+
+		interrupt-parent = <&pmc>;
+		interrupts = <24 IRQ_TYPE_LEVEL_LOW>;
+
+		#interrupt-cells = <2>;
+		interrupt-controller;
+
+		#gpio-cells = <2>;
+		gpio-controller;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&spmic_default>;
+
+		spmic_default: pinmux {
+			gpio0 {
+				pins = "gpio0";
+				function = "gpio";
+			};
+
+			gpio1 {
+				pins = "gpio1";
+				function = "fps-out";
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_0>;
+			};
+
+			gpio2 {
+				pins = "gpio2";
+				function = "fps-out";
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_1>;
+			};
+
+			gpio3 {
+				pins = "gpio3";
+				function = "fps-out";
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_1>;
+			};
+
+			gpio4 {
+				pins = "gpio4";
+				function = "32k-out1";
+				drive-push-pull = <1>;
+			};
+
+			gpio5 {
+				pins = "gpio5";
+				function = "gpio";
+				drive-push-pull = <0>;
+			};
+
+			gpio6 {
+				pins = "gpio6";
+				function = "gpio";
+				drive-push-pull = <1>;
+			};
+
+			gpio7 {
+				pins = "gpio7";
+				function = "gpio";
+				drive-push-pull = <1>;
+			};
+		};
+
+		fps {
+			fps0 {
+				maxim,fps-event-source =
+					<MAX77620_FPS_EVENT_SRC_EN0>;
+				maxim,shutdown-fps-time-period-us = <640>;
+			};
+
+			fps1 {
+				maxim,fps-event-source =
+					<MAX77620_FPS_EVENT_SRC_EN1>;
+				maxim,shutdown-fps-time-period-us = <640>;
+			};
+
+			fps2 {
+				maxim,fps-event-source =
+					<MAX77620_FPS_EVENT_SRC_EN0>;
+				maxim,shutdown-fps-time-period-us = <640>;
+			};
+		};
+
+		regulators {
+			/*
+			 * P3636 hardware has LDO7/8 fed from SD1.
+			 */
+			in-ldo7-8-supply = <&spmic_sd1>;
+
+			spmic_sd1: sd1 {
+				regulator-name = "avdd_dsi_csi";
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <1200000>;
+				regulator-always-on;
+				regulator-boot-on;
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_DEF>;
+			};
+
+			spmic_sd2: sd2 {
+				regulator-name = "vdd-1v8";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
+				regulator-boot-on;
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_DEF>;
+			};
+
+			spmic_ldo7: ldo7 {
+				regulator-name = "vdd-pex-1v00";
+				regulator-min-microvolt = <1000000>;
+				regulator-max-microvolt = <1000000>;
+				regulator-always-on;
+				regulator-boot-on;
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_DEF>;
+			};
+		};
+	};
+};
+
+/*
+ * P3636-0002 PCIe configuration.
+ *
+ * The complete controller itself already lives in tegra186.dtsi.
+ */
+&{/pcie@10003000} {
+	status = "okay";
+
+	dvdd-pex-supply = <&spmic_ldo7>;
+	hvdd-pex-pll-supply = <&spmic_sd2>;
+	hvdd-pex-supply = <&spmic_sd2>;
+	vddio-pexctl-aud-supply = <&spmic_sd2>;
+
+	pci@1,0 {
+		nvidia,num-lanes = <2>;
+		nvidia,disable-clock-request;
+		status = "okay";
+	};
+
+	pci@2,0 {
+		nvidia,num-lanes = <1>;
+		nvidia,disable-clock-request;
+		status = "okay";
+	};
+
+	pci@3,0 {
+		nvidia,num-lanes = <1>;
+		nvidia,disable-clock-request;
+		status = "okay";
+	};
+};
