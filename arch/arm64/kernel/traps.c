@@ -812,12 +812,64 @@ asmlinkage void noinstr handle_bad_stack(struct pt_regs *regs)
 }
 #endif
 
+#ifdef CONFIG_SERROR_HANDLER
+static LIST_HEAD(serr_hooks);
+static DEFINE_RAW_SPINLOCK(serr_lock);
+
+void register_serr_hook(struct serr_hook *hook)
+{
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&serr_lock, flags);
+	list_add(&hook->node, &serr_hooks);
+	raw_spin_unlock_irqrestore(&serr_lock, flags);
+}
+EXPORT_SYMBOL(register_serr_hook);
+
+void unregister_serr_hook(struct serr_hook *hook)
+{
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&serr_lock, flags);
+	list_del(&hook->node);
+	raw_spin_unlock_irqrestore(&serr_lock, flags);
+}
+EXPORT_SYMBOL(unregister_serr_hook);
+
+static void arm64_serror_run_platform_hooks(struct pt_regs *regs, u32 esr)
+{
+	struct serr_hook *hook;
+	unsigned long flags;
+
+	/*
+	 * Tegra186 reports implementation-defined SError state through
+	 * platform MCA registers. Run the legacy NVIDIA callbacks before
+	 * the generic arm64 panic path loses that diagnostic information.
+	 *
+	 * Deliberately ignore the legacy callback return value here. The
+	 * first 5.10 backport is diagnostic-only and retains Linux 5.10's
+	 * normal fatal policy for non-RAS / uncontainable SError.
+	 */
+	raw_spin_lock_irqsave(&serr_lock, flags);
+	list_for_each_entry(hook, &serr_hooks, node)
+		hook->fn(regs, 3, esr, hook->priv);
+	raw_spin_unlock_irqrestore(&serr_lock, flags);
+}
+#else
+static inline void arm64_serror_run_platform_hooks(struct pt_regs *regs,
+						   u32 esr)
+{
+}
+#endif
+
 void __noreturn arm64_serror_panic(struct pt_regs *regs, u32 esr)
 {
 	console_verbose();
 
 	pr_crit("SError Interrupt on CPU%d, code 0x%08x -- %s\n",
 		smp_processor_id(), esr, esr_get_class_string(esr));
+
+	arm64_serror_run_platform_hooks(regs, esr);
 	if (regs)
 		__show_regs(regs);
 

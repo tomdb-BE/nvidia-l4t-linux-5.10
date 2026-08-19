@@ -1987,6 +1987,14 @@ config ARCH_SUSPEND_POSSIBLE
 
 endmenu
 
+config SERROR_HANDLER
+	bool "Platform specific SError handler support"
+	help
+	  Enable registration of platform-specific arm64 SError handlers.
+
+	  This hook API is used by NVIDIA Tegra186 MCA/SError drivers to
+	  report implementation-defined CPU, CCPLEX and fabric errors.
+
 menu "CPU Power Management"
 
 source "drivers/cpuidle/Kconfig"

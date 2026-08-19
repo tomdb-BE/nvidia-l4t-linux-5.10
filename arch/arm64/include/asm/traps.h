@@ -7,7 +7,10 @@
 #ifndef __ASM_TRAP_H
 #define __ASM_TRAP_H
 
+#include <linux/irqflags.h>
 #include <linux/list.h>
+#include <linux/preempt.h>
+#include <asm/cpufeature.h>
 #include <asm/esr.h>
 #include <asm/sections.h>
 
@@ -34,6 +37,25 @@ void arm64_force_sig_ptrace_errno_trap(int errno, void __user *addr, const char 
  * is executed.
  */
 void arm64_skip_faulting_instruction(struct pt_regs *regs, unsigned long size);
+
+#ifdef CONFIG_SERROR_HANDLER
+struct serr_hook {
+	struct list_head node;
+	void *priv;
+	/*
+	 * NVIDIA Tegra legacy semantics:
+	 *   0 - handler found an error that required reboot
+	 *   1 - no fatal error was found / error was handled
+	 *
+	 * Linux 5.10 keeps its normal fatal SError policy; the return value is
+	 * retained for source compatibility with the Tegra186 handlers.
+	 */
+	int (*fn)(struct pt_regs *regs, int reason, unsigned int esr, void *priv);
+};
+
+void register_serr_hook(struct serr_hook *hook);
+void unregister_serr_hook(struct serr_hook *hook);
+#endif
 
 static inline int __in_irqentry_text(unsigned long ptr)
 {

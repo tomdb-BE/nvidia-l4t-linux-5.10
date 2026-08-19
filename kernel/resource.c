@@ -777,6 +777,30 @@ struct resource *lookup_resource(struct resource *root, resource_size_t start)
 	return res;
 }
 
+/**
+ * locate_resource - find an existing resource containing an address
+ * @root: root resource descriptor
+ * @addr: address to locate
+ *
+ * Returns a pointer to the first child resource containing @addr, or NULL.
+ * This helper existed in NVIDIA's Tegra 4.9 kernel and is used by the
+ * Tegra186 MCA/SError diagnostics to resolve fault addresses to devices.
+ */
+struct resource *locate_resource(struct resource *root, resource_size_t addr)
+{
+	struct resource *res;
+
+	read_lock(&resource_lock);
+	for (res = root->child; res; res = res->sibling) {
+		if (addr >= res->start && addr <= res->end)
+			break;
+	}
+	read_unlock(&resource_lock);
+
+	return res;
+}
+EXPORT_SYMBOL_GPL(locate_resource);
+
 /*
  * Insert a resource into the resource tree. If successful, return NULL,
  * otherwise return the conflicting resource (compare to __request_resource())
