@@ -712,6 +712,152 @@ static int tegra_pcie_config_read(struct pci_bus *bus, unsigned int devfn,
 	return pci_generic_config_read(bus, devfn, where, size, value);
 }
 
+/*
+ * Tegra root-port configuration space only supports 32-bit accesses. Linux
+ * can issue byte/word writes to Type-1 and PCIe capability registers, so
+ * emulate those writes while avoiding read/modify/write of adjacent RW1C
+ * status fields.
+ */
+static int tegra_pcie_root_find_capability(struct pci_bus *bus,
+					   unsigned int devfn, u8 cap_id)
+{
+	u32 value;
+	int pos, ttl = 48;
+
+	if (pci_generic_config_read32(bus, devfn, PCI_CAPABILITY_LIST, 1,
+				      &value) != PCIBIOS_SUCCESSFUL)
+		return 0;
+
+	pos = value & ~0x3;
+	while (ttl-- && pos >= 0x40 && pos < PCI_CFG_SPACE_SIZE) {
+		if (pci_generic_config_read32(bus, devfn, pos, 2, &value) !=
+		    PCIBIOS_SUCCESSFUL)
+			break;
+
+		if ((value & 0xff) == cap_id)
+			return pos;
+
+		pos = (value >> 8) & ~0x3;
+	}
+
+	return 0;
+}
+
+static bool tegra_pcie_root_is_pcie_ctl_status(unsigned int pcie_cap,
+					       unsigned int aligned)
+{
+	static const u8 ctl_offsets[] = {
+		PCI_EXP_DEVCTL,
+		PCI_EXP_LNKCTL,
+		PCI_EXP_SLTCTL,
+		PCI_EXP_DEVCTL2,
+		PCI_EXP_LNKCTL2,
+		PCI_EXP_SLTCTL2,
+	};
+	unsigned int i;
+
+	if (!pcie_cap)
+		return false;
+
+	for (i = 0; i < ARRAY_SIZE(ctl_offsets); i++)
+		if (aligned == pcie_cap + ctl_offsets[i])
+			return true;
+
+	return false;
+}
+
+static int tegra_pcie_root_config_write(struct pci_bus *bus,
+					unsigned int devfn, int where,
+					int size, u32 value)
+{
+	unsigned int aligned = where & ~0x3;
+	unsigned int pcie_cap, pm_cap;
+	bool rw1c_pair, pm_dword, type1_rmw, pcie_rmw;
+	void __iomem *addr;
+	u32 shift, mask, val;
+
+	if (size == 4)
+		return pci_generic_config_write32(bus, devfn, where, size,
+						  value);
+
+	pcie_cap = tegra_pcie_root_find_capability(bus, devfn, PCI_CAP_ID_EXP);
+	pm_cap = tegra_pcie_root_find_capability(bus, devfn, PCI_CAP_ID_PM);
+
+	/*
+	 * COMMAND/STATUS and I/O-base+limit/secondary-status are Type-1
+	 * control/status dwords. PCIe has the same lower-control/upper-status
+	 * layout for Device, Link and Slot Control/Status registers. The upper
+	 * status word may contain RW1C bits, so never copy observed status bits
+	 * back during a control write.
+	 */
+	rw1c_pair = aligned == PCI_COMMAND || aligned == PCI_IO_BASE ||
+		    tegra_pcie_root_is_pcie_ctl_status(pcie_cap, aligned);
+
+	/*
+	 * PMCSR is a 16-bit register and PME_STATUS is RW1C.  Its capability
+	 * dword also contains PPB extensions/data in the upper half.  Any
+	 * sub-dword emulation must therefore avoid writing a latched
+	 * PME_STATUS bit back as one when touching either half of the dword.
+	 */
+	pm_dword = pm_cap && aligned == pm_cap + PCI_PM_CTRL;
+
+	/*
+	 * The remaining Type-1 bridge window/bus-number dwords contain no
+	 * RW1C status bits.  A normal 32-bit read/modify/write is therefore
+	 * safe for byte/word accesses and avoids the generic helper's
+	 * deliberately conservative RW1C warning.
+	 */
+	type1_rmw = (aligned >= PCI_PRIMARY_BUS &&
+		     aligned <= PCI_IO_BASE_UPPER16) ||
+		    aligned == PCI_ROM_ADDRESS1 ||
+		    aligned == PCI_INTERRUPT_LINE;
+
+	/*
+	 * PCIe Root Control shares its dword with Root Capabilities.  Root
+	 * Capabilities is read-only and neither half contains RW1C status bits,
+	 * so a controlled 32-bit RMW is safe for the 16-bit Root Control write.
+	 */
+	pcie_rmw = pcie_cap && aligned == pcie_cap + PCI_EXP_RTCTL;
+
+	if (!rw1c_pair && !pm_dword && !type1_rmw && !pcie_rmw)
+		return pci_generic_config_write32(bus, devfn, where, size,
+						  value);
+
+	addr = bus->ops->map_bus(bus, devfn, aligned);
+	if (!addr)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+	shift = (where & 0x3) * 8;
+	mask = ((1U << (size * 8)) - 1) << shift;
+
+	if (pm_dword) {
+		/* Preserve the dword, but never replay a latched PME_STATUS. */
+		val = readl(addr);
+		val &= ~PCI_PM_CTRL_PME_STATUS;
+		val = (val & ~mask) | ((value << shift) & mask);
+	} else if (rw1c_pair) {
+		if (where + size <= aligned + 2) {
+			/* Lower control word: preserve control, write status = 0. */
+			val = readl(addr) & 0xffff;
+			val = (val & ~mask) | ((value << shift) & mask);
+		} else if (where >= aligned + 2 && where + size <= aligned + 4) {
+			/* Upper status word: write only the requested status bits. */
+			val = readl(addr) & 0xffff;
+			val |= (value << shift) & mask;
+		} else {
+			return pci_generic_config_write32(bus, devfn, where, size,
+							  value);
+		}
+	} else {
+		/* Type-1 dword with no RW1C bits: ordinary 32-bit RMW is safe. */
+		val = readl(addr);
+		val = (val & ~mask) | ((value << shift) & mask);
+	}
+
+	writel(val, addr);
+	return PCIBIOS_SUCCESSFUL;
+}
+
 static int tegra_pcie_config_write(struct pci_bus *bus, unsigned int devfn,
 				   int where, int size, u32 value)
 {
@@ -720,8 +866,8 @@ static int tegra_pcie_config_write(struct pci_bus *bus, unsigned int devfn,
 	struct pci_dev *bridge;
 
 	if (bus->number == 0)
-		return pci_generic_config_write32(bus, devfn, where, size,
-						  value);
+		return tegra_pcie_root_config_write(bus, devfn, where, size,
+						    value);
 
 	bridge = pcie_find_root_port(bus->self);
 

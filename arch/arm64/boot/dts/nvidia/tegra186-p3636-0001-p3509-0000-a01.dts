@@ -63,19 +63,19 @@
 	status = "okay";
 };
 
+/* Enable the Tegra186 security-engine TRNG used by the hwrng bridge. */
+&se {
+	status = "okay";
+};
+
 /*
- * MAX77620 on Tegra186 BPMP I2C bus.
+ * MAX77620 system PMIC.
  *
- * For the initial NVMe bring-up we describe only the PMIC rails
- * required by PCIe:
- *
- *   SD1  = 1.2 V, upstream supply for LDO7/8
- *   SD2  = 1.8 V, PCIe HVDD / PLL / IO
- *   LDO7 = 1.0 V, PCIe DVDD
- *
- * These values come from NVIDIA's P3636 board DTS rather than
- * the P3310/TX2 regulator assignments.
-  */
+ * This is the P3636-0001 rail/FPS description from NVIDIA's T18x
+ * downstream board tree, translated to the 5.10 MAX77620 bindings.
+ * Only board-consumer mappings needed by this headless TX2 NX port
+ * are described below; display/camera/XUSB consumer rails stay out.
+ */
 &bpmp_i2c {
 	status = "okay";
 
@@ -94,6 +94,11 @@
 
 		#thermal-sensor-cells = <0>;
 
+		/* P3636 uses the PMIC as the system power-off controller. */
+		maxim,enable-clock32k-out;
+		maxim,system-pmic-power-off;
+		maxim,avoid-power-off-commands;
+
 		pinctrl-names = "default";
 		pinctrl-0 = <&spmic_default>;
 
@@ -108,6 +113,8 @@
 				function = "fps-out";
 				maxim,active-fps-source =
 					<MAX77620_FPS_SRC_0>;
+				maxim,active-fps-power-up-slot = <1>;
+				maxim,active-fps-power-down-slot = <3>;
 			};
 
 			gpio2 {
@@ -115,6 +122,9 @@
 				function = "fps-out";
 				maxim,active-fps-source =
 					<MAX77620_FPS_SRC_1>;
+				maxim,active-fps-power-up-slot = <7>;
+				maxim,active-fps-power-down-slot = <1>;
+				status = "disabled";
 			};
 
 			gpio3 {
@@ -122,6 +132,9 @@
 				function = "fps-out";
 				maxim,active-fps-source =
 					<MAX77620_FPS_SRC_1>;
+				maxim,active-fps-power-up-slot = <1>;
+				maxim,active-fps-power-down-slot = <7>;
+				status = "disabled";
 			};
 
 			gpio4 {
@@ -149,6 +162,14 @@
 			};
 		};
 
+		spmic_gpio_input {
+			gpio-hog;
+			gpios = <5 0 6 0>;
+			input;
+			label = "spmic_gpio_input_5",
+				"spmic_gpio_input_6";
+		};
+
 		fps {
 			fps0 {
 				maxim,fps-event-source =
@@ -160,6 +181,8 @@
 				maxim,fps-event-source =
 					<MAX77620_FPS_EVENT_SRC_EN1>;
 				maxim,shutdown-fps-time-period-us = <640>;
+				maxim,device-state-on-disabled-event =
+					<MAX77620_FPS_INACTIVE_STATE_SLEEP>;
 			};
 
 			fps2 {
@@ -169,11 +192,36 @@
 			};
 		};
 
+		backup-battery {
+			backup-battery-charging-current = <100>;
+			backup-battery-charging-voltage = <3000000>;
+			backup-battery-output-resister = <100>;
+			status = "disabled";
+		};
+
 		regulators {
 			/*
-			 * P3636 hardware has LDO7/8 fed from SD1.
-			  */
+			 * NVIDIA's P3636 wiring has LDO4 and LDO6 sourced
+			 * from SD2, and LDO7/LDO8 sourced from SD1.  The
+			 * 5.10 MAX77620 driver represents LDO4/LDO6 as one
+			 * shared "in-ldo4-6" supply.
+			 */
+			in-ldo4-6-supply = <&spmic_sd2>;
 			in-ldo7-8-supply = <&spmic_sd1>;
+
+			spmic_sd0: sd0 {
+				regulator-name = "vddio-ddr";
+				regulator-boot-on;
+				regulator-always-on;
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_0>;
+				maxim,active-fps-power-up-slot = <5>;
+				maxim,active-fps-power-down-slot = <2>;
+				regulator-enable-ramp-delay = <278>;
+				regulator-disable-ramp-delay = <153000>;
+				maxim,ramp-rate-setting = <27500>;
+				regulator-ramp-delay = <3930>;
+			};
 
 			spmic_sd1: sd1 {
 				regulator-name = "avdd_dsi_csi";
@@ -182,7 +230,13 @@
 				regulator-always-on;
 				regulator-boot-on;
 				maxim,active-fps-source =
-					<MAX77620_FPS_SRC_DEF>;
+					<MAX77620_FPS_SRC_1>;
+				maxim,active-fps-power-up-slot = <3>;
+				maxim,active-fps-power-down-slot = <1>;
+				regulator-enable-ramp-delay = <211>;
+				regulator-disable-ramp-delay = <40000>;
+				maxim,ramp-rate-setting = <27500>;
+				regulator-ramp-delay = <5500>;
 			};
 
 			spmic_sd2: sd2 {
@@ -192,7 +246,13 @@
 				regulator-always-on;
 				regulator-boot-on;
 				maxim,active-fps-source =
-					<MAX77620_FPS_SRC_DEF>;
+					<MAX77620_FPS_SRC_0>;
+				maxim,active-fps-power-up-slot = <0>;
+				maxim,active-fps-power-down-slot = <7>;
+				regulator-enable-ramp-delay = <4000>;
+				regulator-disable-ramp-delay = <21000>;
+				maxim,ramp-rate-setting = <27500>;
+				regulator-ramp-delay = <450>;
 			};
 
 			spmic_sd3: sd3 {
@@ -202,7 +262,101 @@
 				regulator-always-on;
 				regulator-boot-on;
 				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_0>;
+				maxim,active-fps-power-up-slot = <6>;
+				maxim,active-fps-power-down-slot = <1>;
+				regulator-enable-ramp-delay = <574>;
+				regulator-disable-ramp-delay = <40000>;
+				maxim,ramp-rate-setting = <27500>;
+				regulator-ramp-delay = <5500>;
+			};
+
+			spmic_ldo0: ldo0 {
+				regulator-name = "spmic-ldo0";
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_1>;
+				regulator-enable-ramp-delay = <1000>;
+				maxim,active-fps-power-up-slot = <3>;
+				maxim,active-fps-power-down-slot = <3>;
+				maxim,ramp-rate-setting = <100000>;
+				regulator-ramp-delay = <100000>;
+			};
+
+			spmic_ldo1: ldo1 {
+				regulator-name = "spmic-ldo1";
+				maxim,active-fps-source =
 					<MAX77620_FPS_SRC_DEF>;
+				regulator-enable-ramp-delay = <1000>;
+				maxim,ramp-rate-setting = <100000>;
+				regulator-ramp-delay = <100000>;
+			};
+
+			spmic_ldo2: ldo2 {
+				regulator-name = "vddio-3v3";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-always-on;
+				regulator-boot-on;
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_0>;
+				maxim,active-fps-power-up-slot = <6>;
+				maxim,active-fps-power-down-slot = <1>;
+				regulator-enable-ramp-delay = <152>;
+				regulator-disable-ramp-delay = <14000>;
+				maxim,ramp-rate-setting = <100000>;
+				regulator-ramp-delay = <20000>;
+			};
+
+			spmic_ldo3: ldo3 {
+				regulator-name = "vddio-sdmmc1";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <3300000>;
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_NONE>;
+				maxim,active-fps-power-up-slot = <0>;
+				maxim,active-fps-power-down-slot = <7>;
+				regulator-enable-ramp-delay = <160>;
+				regulator-disable-ramp-delay = <16000>;
+				maxim,ramp-rate-setting = <5000>;
+				regulator-ramp-delay = <1000>;
+			};
+
+			spmic_ldo4: ldo4 {
+				regulator-name = "vdd-rtc";
+				regulator-always-on;
+				regulator-boot-on;
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_0>;
+				maxim,active-fps-power-up-slot = <1>;
+				maxim,active-fps-power-down-slot = <7>;
+				regulator-enable-ramp-delay = <26>;
+				regulator-disable-ramp-delay = <1650>;
+				maxim,ramp-rate-setting = <100000>;
+				regulator-ramp-delay = <33000>;
+			};
+
+			spmic_ldo5: ldo5 {
+				regulator-name = "avdd-ts-hv";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <3300000>;
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_DEF>;
+				maxim,active-fps-power-up-slot = <0>;
+				maxim,active-fps-power-down-slot = <7>;
+				regulator-enable-ramp-delay = <309>;
+				regulator-disable-ramp-delay = <16000>;
+				maxim,ramp-rate-setting = <5000>;
+				regulator-ramp-delay = <526>;
+			};
+
+			spmic_ldo6: ldo6 {
+				regulator-name = "spmic-ldo6";
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_NONE>;
+				regulator-always-on;
+				regulator-boot-on;
+				maxim,ramp-rate-setting = <100000>;
+				regulator-ramp-delay = <100000>;
 			};
 
 			spmic_ldo7: ldo7 {
@@ -211,6 +365,20 @@
 				regulator-max-microvolt = <1000000>;
 				regulator-always-on;
 				regulator-boot-on;
+				maxim,active-fps-source =
+					<MAX77620_FPS_SRC_1>;
+				maxim,active-fps-power-up-slot = <4>;
+				maxim,active-fps-power-down-slot = <1>;
+				regulator-enable-ramp-delay = <95>;
+				regulator-disable-ramp-delay = <15000>;
+				maxim,ramp-rate-setting = <100000>;
+				regulator-ramp-delay = <10000>;
+			};
+
+			spmic_ldo8: ldo8 {
+				regulator-name = "dvdd-pex";
+				regulator-min-microvolt = <1000000>;
+				regulator-max-microvolt = <1000000>;
 				maxim,active-fps-source =
 					<MAX77620_FPS_SRC_DEF>;
 			};
@@ -320,6 +488,43 @@
 };
 
 /*
+ * P3636 module power monitor.
+ *
+ * NVIDIA's 4.9 board tree used the downstream "ti,ina3221x" binding.
+ * Linux 5.10 has the upstream INA3221 hwmon driver, so translate the
+ * three P3636 rails to its standard binding and preserve the 5 mOhm
+ * shunts from the original board description.
+ */
+&cam_i2c {
+	status = "okay";
+
+	ina3221@40 {
+		compatible = "ti,ina3221";
+		reg = <0x40>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		input@0 {
+			reg = <0>;
+			label = "VDD_IN";
+			shunt-resistor-micro-ohms = <5000>;
+		};
+
+		input@1 {
+			reg = <1>;
+			label = "VDD_CPU_GPU";
+			shunt-resistor-micro-ohms = <5000>;
+		};
+
+		input@2 {
+			reg = <2>;
+			label = "VDD_SOC";
+			shunt-resistor-micro-ohms = <5000>;
+		};
+	};
+};
+
+/*
  * Tegra186 GP10B GPU.
  *
  * The upstream Tegra186 DT uses the generic "nvidia,gp10b"
@@ -389,6 +594,10 @@
 /* P3636 onboard eMMC -- settings ported from NVIDIA L4T 4.9 */
 &sdmmc4 {
 	status = "okay";
+
+	/* P3636 eMMC power tree from NVIDIA's downstream board DTS. */
+	vqmmc-supply = <&spmic_sd2>;
+	vmmc-supply = <&spmic_sd3>;
 
 	max-clk-limit = <196249804>;
 	ddr-clk-limit = <48000000>;
