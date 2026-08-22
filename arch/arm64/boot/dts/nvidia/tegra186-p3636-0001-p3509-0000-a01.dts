@@ -8,6 +8,8 @@
 
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/mfd/max77620.h>
+#include "tegra186-p3636-0001-display.dtsi"
+#include "tegra186-p3636-0001-display-imp.dtsi"
 
 / {
 	model = "NVIDIA Jetson TX2 NX P3636-0001 on P3509-0000";
@@ -20,6 +22,7 @@
 	aliases {
 		serial0 = &uarta;
 		ethernet0 = "/ethernet@2490000";
+		i2c3 = &dp_aux_ch1_i2c;
 	};
 
 	aliases {

@@ -1,0 +1,605 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Tegra186/TX2 NX legacy NVIDIA framebuffer/display wiring for Linux 5.10. */
+#include <dt-bindings/display/tegra-dc.h>
+
+/ {
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		fb0_reserved: fb0_carveout {
+			reg = <0 0 0 0>, <0 0 0 0>;
+			reg-names = "surface", "lut";
+			no-map;
+		};
+
+		fb1_reserved: fb1_carveout {
+			reg = <0 0 0 0>, <0 0 0 0>;
+			reg-names = "surface", "lut";
+			no-map;
+		};
+
+		fb2_reserved: fb2_carveout {
+			reg = <0 0 0 0>, <0 0 0 0>;
+			reg-names = "surface", "lut";
+			no-map;
+		};
+	};
+};
+
+&host1x {
+
+	head0_legacy: nvdisplay@15200000 {
+		compatible = "nvidia,tegra186-dc";
+		reg = <0x15200000 0x10000>;
+		interrupts = <GIC_SPI 153 IRQ_TYPE_LEVEL_HIGH>;
+		iommus = <&smmu TEGRA186_SID_NVDISPLAY>;
+		power-domains = <&bpmp TEGRA186_POWER_DOMAIN_DISP>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISPB>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISPC>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISP>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISP>;
+		power-domain-names = "disa", "disb", "disc", "dpaux", "sor";
+
+		nvidia,dc-ctrlnum = <0>;
+		nvidia,dc-flags = <TEGRA_DC_FLAG_ENABLED>;
+		nvidia,fb-bpp = <32>;
+		nvidia,fb-flags = <TEGRA_FB_FLIP_ON_PROBE>;
+		nvidia,fb-win = <0>;
+		win-mask = <0x7>;
+		nvidia,dc-or-node = "/host1x/sor1";
+		nvidia,dc-connector = <&sor1>;
+		nvidia,cmu-enable = <1>;
+		fb_reserved = <&fb0_reserved>;
+
+		clocks = <&bpmp TEGRA186_CLK_NVDISPLAY_DISP>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAYHUB>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_P0>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_P1>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_P2>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_DSC>,
+			 <&bpmp TEGRA186_CLK_PLLD>,
+			 <&bpmp TEGRA186_CLK_PLLD2>,
+			 <&bpmp TEGRA186_CLK_PLLD3>,
+			 <&bpmp TEGRA186_CLK_PLLP_OUT0>,
+			 <&bpmp TEGRA186_CLK_PLLD_OUT1>,
+			 <&bpmp TEGRA186_CLK_EMC>;
+		clock-names = "nvdisplay_disp", "nvdisplayhub",
+			      "nvdisplay_p0", "nvdisplay_p1", "nvdisplay_p2",
+			      "nvdisp_dsc", "pll_d", "plld2", "plld3",
+			      "pllp_display", "pll_d_out1", "disp1_emc";
+
+		resets = <&bpmp TEGRA186_RESET_NVDISPLAY0_MISC>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP0>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP1>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP2>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP3>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP4>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP5>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_HEAD0>;
+		reset-names = "misc", "wgrp0", "wgrp1", "wgrp2",
+			      "wgrp3", "wgrp4", "wgrp5", "head0";
+		disable-seamless = <1>;
+		status = "okay";
+	};
+
+	head1_legacy: nvdisplay@15210000 {
+		compatible = "nvidia,tegra186-dc";
+		reg = <0x15210000 0x10000>;
+		interrupts = <GIC_SPI 154 IRQ_TYPE_LEVEL_HIGH>;
+		iommus = <&smmu TEGRA186_SID_NVDISPLAY>;
+		power-domains = <&bpmp TEGRA186_POWER_DOMAIN_DISP>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISPB>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISPC>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISP>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISP>;
+		power-domain-names = "disa", "disb", "disc", "dpaux", "sor";
+
+		nvidia,dc-ctrlnum = <1>;
+		nvidia,dc-flags = <TEGRA_DC_FLAG_ENABLED>;
+		nvidia,fb-bpp = <32>;
+		nvidia,fb-flags = <TEGRA_FB_FLIP_ON_PROBE>;
+		nvidia,fb-win = <3>;
+		win-mask = <0x38>;
+		nvidia,dc-or-node = "/host1x/sor0";
+		nvidia,dc-connector = <&sor0>;
+		nvidia,cmu-enable = <1>;
+		fb_reserved = <&fb1_reserved>;
+
+		clocks = <&bpmp TEGRA186_CLK_NVDISPLAY_DISP>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAYHUB>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_P0>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_P1>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_P2>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_DSC>,
+			 <&bpmp TEGRA186_CLK_PLLD>,
+			 <&bpmp TEGRA186_CLK_PLLD2>,
+			 <&bpmp TEGRA186_CLK_PLLD3>,
+			 <&bpmp TEGRA186_CLK_PLLP_OUT0>,
+			 <&bpmp TEGRA186_CLK_PLLD_OUT1>,
+			 <&bpmp TEGRA186_CLK_EMC>;
+		clock-names = "nvdisplay_disp", "nvdisplayhub",
+			      "nvdisplay_p0", "nvdisplay_p1", "nvdisplay_p2",
+			      "nvdisp_dsc", "pll_d", "plld2", "plld3",
+			      "pllp_display", "pll_d_out1", "disp2_emc";
+
+		resets = <&bpmp TEGRA186_RESET_NVDISPLAY0_MISC>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP0>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP1>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP2>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP3>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP4>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP5>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_HEAD1>;
+		reset-names = "misc", "wgrp0", "wgrp1", "wgrp2",
+			      "wgrp3", "wgrp4", "wgrp5", "head1";
+		disable-seamless = <1>;
+		status = "okay";
+	};
+
+	display-hub@15200000 {
+		status = "okay";
+		nvidia,valid_heads = <0x3>;
+
+		display@15200000 {
+			status = "okay";
+			nvidia,dc-ctrlnum = <0>;
+			nvidia,dc-flags = <TEGRA_DC_FLAG_ENABLED>;
+			nvidia,fb-bpp = <32>;
+			nvidia,fb-flags = <TEGRA_FB_FLIP_ON_PROBE>;
+			nvidia,fb-win = <0>;
+			win-mask = <0x7>;
+			nvidia,dc-connector = <&sor1>;
+			nvidia,cmu-enable = <1>;
+			fb_reserved = <&fb0_reserved>;
+
+			clocks = <&bpmp TEGRA186_CLK_NVDISPLAY_DISP>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAYHUB>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAY_P0>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAY_P1>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAY_P2>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAY_DSC>,
+				 <&bpmp TEGRA186_CLK_PLLD>,
+				 <&bpmp TEGRA186_CLK_PLLD2>,
+				 <&bpmp TEGRA186_CLK_PLLD3>,
+				 <&bpmp TEGRA186_CLK_PLLP_OUT0>,
+				 <&bpmp TEGRA186_CLK_PLLD_OUT1>,
+				 <&bpmp TEGRA186_CLK_EMC>;
+			clock-names = "nvdisplay_disp", "nvdisplayhub",
+				      "nvdisplay_p0", "nvdisplay_p1", "nvdisplay_p2",
+				      "nvdisp_dsc", "pll_d", "plld2", "plld3",
+				      "pllp_display", "pll_d_out1", "disp1_emc";
+		};
+
+		display@15210000 {
+			status = "okay";
+			nvidia,dc-ctrlnum = <1>;
+			nvidia,dc-flags = <TEGRA_DC_FLAG_ENABLED>;
+			nvidia,fb-bpp = <32>;
+			nvidia,fb-flags = <TEGRA_FB_FLIP_ON_PROBE>;
+			nvidia,fb-win = <3>;
+			win-mask = <0x38>;
+			nvidia,dc-connector = <&sor0>;
+			nvidia,cmu-enable = <1>;
+			fb_reserved = <&fb1_reserved>;
+
+			clocks = <&bpmp TEGRA186_CLK_NVDISPLAY_DISP>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAYHUB>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAY_P0>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAY_P1>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAY_P2>,
+				 <&bpmp TEGRA186_CLK_NVDISPLAY_DSC>,
+				 <&bpmp TEGRA186_CLK_PLLD>,
+				 <&bpmp TEGRA186_CLK_PLLD2>,
+				 <&bpmp TEGRA186_CLK_PLLD3>,
+				 <&bpmp TEGRA186_CLK_PLLP_OUT0>,
+				 <&bpmp TEGRA186_CLK_PLLD_OUT1>,
+				 <&bpmp TEGRA186_CLK_EMC>;
+			clock-names = "nvdisplay_disp", "nvdisplayhub",
+				      "nvdisplay_p0", "nvdisplay_p1", "nvdisplay_p2",
+				      "nvdisp_dsc", "pll_d", "plld2", "plld3",
+				      "pllp_display", "pll_d_out1", "disp2_emc";
+		};
+
+		display@15220000 { status = "disabled"; fb_reserved = <&fb2_reserved>; };
+	};
+};
+
+&sor0 {
+	status = "okay";
+	reg = <0x15540000 0x40000>;
+	nvidia,sor-ctrlnum = <0>;
+	nvidia,dpaux = <&dpaux>;
+	nvidia,xbar-ctrl = <0 1 2 3 4>;
+	nvidia,hpd-gpio = <&gpio TEGRA_MAIN_GPIO(P, 0) GPIO_ACTIVE_LOW>;
+	nvidia,active-panel = <&sor0_dp_display>;
+	clocks = <&bpmp TEGRA186_CLK_SOR0>, <&bpmp TEGRA186_CLK_SOR_SAFE>,
+		 <&bpmp TEGRA186_CLK_SOR0_PAD_CLKOUT>, <&bpmp TEGRA186_CLK_SOR0_OUT>,
+		 <&bpmp TEGRA186_CLK_PLLDP>, <&bpmp TEGRA186_CLK_PLLP_OUT0>,
+		 <&bpmp TEGRA186_CLK_MAUD>, <&bpmp TEGRA186_CLK_HDA>,
+		 <&bpmp TEGRA186_CLK_HDA2CODEC_2X>, <&bpmp TEGRA186_CLK_HDA2HDMICODEC>;
+	clock-names = "sor0_ref", "sor_safe", "sor0_pad_clkout", "sor0",
+		      "pll_dp", "pllp_out0", "maud", "hda", "hda2codec_2x", "hda2hdmi";
+
+	sor0_dp_display: dp-display {
+		compatible = "dp, display";
+		status = "okay";
+		nvidia,is_ext_dp_panel = <1>;
+		disp-default-out {
+			nvidia,out-type = <TEGRA_DC_OUT_DP>;
+			nvidia,out-align = <TEGRA_DC_ALIGN_MSB>;
+			nvidia,out-order = <TEGRA_DC_ORDER_RED_BLUE>;
+			nvidia,out-flags = <TEGRA_DC_OUT_CONTINUOUS_MODE>;
+			nvidia,out-parent-clk = "plld3";
+			nvidia,out-xres = <4096>;
+			nvidia,out-yres = <2160>;
+		};
+	};
+};
+
+&sor1 {
+	status = "okay";
+	compatible = "nvidia,tegra186-sor1";
+	reg = <0x15580000 0x40000>;
+	nvidia,sor-ctrlnum = <1>;
+	nvidia,dpaux = <&dpaux1>;
+	nvidia,xbar-ctrl = <0 1 2 3 4>;
+	nvidia,hpd-gpio = <&gpio TEGRA_MAIN_GPIO(P, 1) GPIO_ACTIVE_LOW>;
+	nvidia,active-panel = <&sor1_hdmi_display>;
+	clocks = <&bpmp TEGRA186_CLK_SOR1>, <&bpmp TEGRA186_CLK_SOR_SAFE>,
+		 <&bpmp TEGRA186_CLK_SOR1_PAD_CLKOUT>, <&bpmp TEGRA186_CLK_SOR1_OUT>,
+		 <&bpmp TEGRA186_CLK_PLLDP>, <&bpmp TEGRA186_CLK_PLLP_OUT0>,
+		 <&bpmp TEGRA186_CLK_MAUD>, <&bpmp TEGRA186_CLK_HDA>,
+		 <&bpmp TEGRA186_CLK_HDA2CODEC_2X>, <&bpmp TEGRA186_CLK_HDA2HDMICODEC>;
+	clock-names = "sor1_ref", "sor_safe", "sor1_pad_clkout", "sor1",
+		      "pll_dp", "pllp_out0", "maud", "hda", "hda2codec_2x", "hda2hdmi";
+
+	sor1_hdmi_display: hdmi-display {
+		compatible = "hdmi,display";
+		status = "okay";
+		disp-default-out {
+			nvidia,out-type = <TEGRA_DC_OUT_HDMI>;
+			nvidia,out-flags = <TEGRA_DC_OUT_HOTPLUG_LOW>;
+			nvidia,out-parent-clk = "plld2";
+			nvidia,out-align = <TEGRA_DC_ALIGN_MSB>;
+			nvidia,out-order = <TEGRA_DC_ORDER_RED_BLUE>;
+			nvidia,out-xres = <4096>;
+			nvidia,out-yres = <2160>;
+		};
+	};
+};
+
+&dpaux { status = "okay"; nvidia,dpaux-ctrlnum = <0>; };
+&dpaux1 { status = "okay"; nvidia,dpaux-ctrlnum = <1>; };
+
+/*
+ * Tegra186 legacy nvdisplay DPAUX ABI required by the NVIDIA tegradc
+ * driver carried in this 5.10 tree.
+ */
+
+&dpaux {
+	nvidia,dpaux-ctrlnum = <0>;
+
+	prod-settings {
+		#prod-cells = <3>;
+
+		prod_c_dpaux_dp {
+			prod = <
+				0x00000124 0x000037fe 0x000024c2
+			>;
+		};
+
+		prod_c_dpaux_hdmi {
+			prod = <
+				0x00000124 0x00000700 0x00000400
+			>;
+		};
+	};
+};
+
+&dpaux1 {
+	compatible = "nvidia,tegra186-dpaux1";
+	nvidia,dpaux-ctrlnum = <1>;
+
+	clock-names = "dpaux1", "parent";
+	reset-names = "dpaux1";
+
+	prod-settings {
+		#prod-cells = <3>;
+
+		prod_c_dpaux_dp {
+			prod = <
+				0x00000124 0x000037fe 0x000024c2
+			>;
+		};
+
+		prod_c_dpaux_hdmi {
+			prod = <
+				0x00000124 0x00000700 0x00000400
+			>;
+		};
+	};
+};
+
+/* Legacy tegradc SOR driver indexes reset names by controller number. */
+&sor0 {
+	reset-names = "sor0";
+};
+
+&sor1 {
+	reset-names = "sor1";
+};
+
+/*
+ * Tegra186 HDMI DDC.  NVIDIA's original T186 display DT routes SOR1
+ * DDC through I2C4, which shares the DPAUX1 pads.
+ */
+&sor1 {
+	nvidia,ddc-i2c-bus = <&dp_aux_ch1_i2c>;
+};
+
+&dp_aux_ch1_i2c {
+	status = "okay";
+};
+
+/*
+ * DPAUX1 DDC I2C controller.
+ *
+ * The legacy NVIDIA tegradc/SOR driver owns DPAUX1 pad switching.
+ * Do not also make the Tegra I2C controller depend on the DPAUX
+ * pinctrl provider, otherwise 3190000.i2c gets stuck in deferred probe.
+ */
+&dp_aux_ch1_i2c {
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	/delete-property/ pinctrl-1;
+
+	clock-frequency = <100000>;
+	status = "okay";
+};
+
+/*
+ * Tegra186 NvDisplay SOR pad deep-power-down control.
+ *
+ * The legacy NVIDIA tegradc/SOR driver requests these states from the
+ * NvDisplay head device by name.  Without them the HDMI/DPAUX pads remain
+ * unavailable and HDMI DDC transactions on i2c-3 time out.
+ */
+&pmc {
+	hdmi_dp0_dpd_enable: hdmi-dp0-dpd-enable {
+		hdmi-dp0-pad-lowpower-enable {
+			pins = "hdmi-dp0";
+			low-power-enable;
+		};
+	};
+
+	hdmi_dp0_dpd_disable: hdmi-dp0-dpd-disable {
+		hdmi-dp0-pad-lowpower-disable {
+			pins = "hdmi-dp0";
+			low-power-disable;
+		};
+	};
+
+	hdmi_dp1_dpd_enable: hdmi-dp1-dpd-enable {
+		hdmi-dp1-pad-lowpower-enable {
+			pins = "hdmi-dp1";
+			low-power-enable;
+		};
+	};
+
+	hdmi_dp1_dpd_disable: hdmi-dp1-dpd-disable {
+		hdmi-dp1-pad-lowpower-disable {
+			pins = "hdmi-dp1";
+			low-power-disable;
+		};
+	};
+};
+
+&head0_legacy {
+	pinctrl-names = "hdmi-dp0-dpd-disable",
+			"hdmi-dp0-dpd-enable",
+			"hdmi-dp1-dpd-disable",
+			"hdmi-dp1-dpd-enable";
+	pinctrl-0 = <&hdmi_dp0_dpd_disable>;
+	pinctrl-1 = <&hdmi_dp0_dpd_enable>;
+	pinctrl-2 = <&hdmi_dp1_dpd_disable>;
+	pinctrl-3 = <&hdmi_dp1_dpd_enable>;
+};
+
+&head1_legacy {
+	pinctrl-names = "hdmi-dp0-dpd-disable",
+			"hdmi-dp0-dpd-enable",
+			"hdmi-dp1-dpd-disable",
+			"hdmi-dp1-dpd-enable";
+	pinctrl-0 = <&hdmi_dp0_dpd_disable>;
+	pinctrl-1 = <&hdmi_dp0_dpd_enable>;
+	pinctrl-2 = <&hdmi_dp1_dpd_disable>;
+	pinctrl-3 = <&hdmi_dp1_dpd_enable>;
+};
+
+/*
+ * Original P3636 HDMI analog/PLL/connector power mapping.
+ */
+&head0_legacy {
+	avdd_hdmi-supply = <&spmic_ldo7>;
+	avdd_hdmi_pll-supply = <&spmic_sd2>;
+};
+
+&head1_legacy {
+	avdd_hdmi-supply = <&spmic_ldo7>;
+	avdd_hdmi_pll-supply = <&spmic_sd2>;
+};
+
+&dp_aux_ch1_i2c {
+	clocks = <&bpmp TEGRA186_CLK_I2C4>,
+		 <&bpmp TEGRA186_CLK_PLLP_OUT0>,
+		 <&bpmp TEGRA186_CLK_AON_I2C_SLOW>;
+	clock-names = "div-clk", "parent", "slow-clk";
+
+	clock-frequency = <100000>;
+	status = "okay";
+};
+
+/*
+ * Tegra186 boot/display framebuffer carveouts.
+ *
+ * NvDisplay accesses these physical framebuffer regions directly.
+ * Preserve identity mappings in the display IOMMU domain, matching
+ * NVIDIA's original T186 display DT.
+ */
+&{/host1x@13e00000/display-hub@15200000} {
+	iommu-direct-regions = <&fb0_reserved
+				&fb1_reserved
+				&fb2_reserved>;
+};
+
+&head0_legacy {
+	iommu-direct-regions = <&fb0_reserved
+				&fb1_reserved
+				&fb2_reserved>;
+};
+
+&head1_legacy {
+	iommu-direct-regions = <&fb0_reserved
+				&fb1_reserved
+				&fb2_reserved>;
+};
+
+/*
+ * Restore the original P3636 NvDisplay topology from NVIDIA 4.9:
+ *
+ *   head0 -> DSI              windows A/B
+ *   head1 -> SOR1 / HDMI      windows C/D
+ *   head2 -> SOR0 / DP        windows E/F
+ *
+ * This board does not use DSI, so head0 stays disabled.
+ */
+
+&head0_legacy {
+	status = "disabled";
+};
+
+&head1_legacy {
+	status = "okay";
+
+	nvidia,dc-ctrlnum = <1>;
+	nvidia,fb-win = <2>;
+	win-mask = <0x0c>;
+
+	nvidia,dc-or-node = "/host1x/sor1";
+	nvidia,dc-connector = <&sor1>;
+
+	fb_reserved = <&fb1_reserved>;
+
+	/* Required by the 5.10 tegra_bpmp_get() conversion. */
+	nvidia,bpmp = <&bpmp>;
+};
+
+
+/*
+ * Original P3636 DP head.
+ *
+ * NVIDIA 4.9 uses nvdisplay@15220000 / controller 2 for SOR0.
+ */
+&host1x {
+	head2_legacy: nvdisplay@15220000 {
+		compatible = "nvidia,tegra186-dc";
+		reg = <0x15220000 0x10000>;
+		interrupts = <GIC_SPI 155 IRQ_TYPE_LEVEL_HIGH>;
+
+		iommus = <&smmu TEGRA186_SID_NVDISPLAY>;
+
+		nvidia,dc-ctrlnum = <2>;
+		nvidia,dc-flags = <TEGRA_DC_FLAG_ENABLED>;
+		nvidia,fb-bpp = <32>;
+		nvidia,fb-flags = <TEGRA_FB_FLIP_ON_PROBE>;
+
+		nvidia,fb-win = <4>;
+		win-mask = <0x30>;
+
+		nvidia,dc-or-node = "/host1x/sor0";
+		nvidia,dc-connector = <&sor0>;
+		nvidia,cmu-enable = <1>;
+
+		fb_reserved = <&fb2_reserved>;
+
+		nvidia,bpmp = <&bpmp>;
+
+		clocks = <&bpmp TEGRA186_CLK_NVDISPLAY_DISP>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAYHUB>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_P0>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_P1>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_P2>,
+			 <&bpmp TEGRA186_CLK_NVDISPLAY_DSC>,
+			 <&bpmp TEGRA186_CLK_PLLD2>,
+			 <&bpmp TEGRA186_CLK_PLLD3>,
+			 <&bpmp TEGRA186_CLK_PLLP_OUT0>,
+			 <&bpmp TEGRA186_CLK_EMC>;
+
+		clock-names = "nvdisplay_disp",
+			      "nvdisplayhub",
+			      "nvdisplay_p0",
+			      "nvdisplay_p1",
+			      "nvdisplay_p2",
+			      "nvdisp_dsc",
+			      "plld2",
+			      "plld3",
+			      "pllp_display",
+			      "disp3_emc";
+
+		resets = <&bpmp TEGRA186_RESET_NVDISPLAY0_MISC>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP0>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP1>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP2>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP3>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP4>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_WGRP5>,
+			 <&bpmp TEGRA186_RESET_NVDISPLAY0_HEAD2>;
+
+		reset-names = "misc", "wgrp0", "wgrp1", "wgrp2",
+			      "wgrp3", "wgrp4", "wgrp5", "head2";
+
+		/*
+		 * The common NvDisplay code attaches all three display
+		 * domains from whichever head probes first.
+		 */
+		power-domains = <&bpmp TEGRA186_POWER_DOMAIN_DISP>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISPB>,
+				<&bpmp TEGRA186_POWER_DOMAIN_DISPC>;
+		power-domain-names = "disa", "disb", "disc";
+
+		pinctrl-names = "hdmi-dp0-dpd-disable",
+				"hdmi-dp0-dpd-enable",
+				"hdmi-dp1-dpd-disable",
+				"hdmi-dp1-dpd-enable";
+		pinctrl-0 = <&hdmi_dp0_dpd_disable>;
+		pinctrl-1 = <&hdmi_dp0_dpd_enable>;
+		pinctrl-2 = <&hdmi_dp1_dpd_disable>;
+		pinctrl-3 = <&hdmi_dp1_dpd_enable>;
+
+		iommu-direct-regions = <&fb0_reserved
+					&fb1_reserved
+					&fb2_reserved>;
+
+		status = "okay";
+	};
+};
+
+&{/host1x@13e00000/display-hub@15200000} {
+	nvidia,valid_heads = <0x6>;
+};
+
+/*
+ * Legacy tegradc DPAUX/SOR code attaches these named power domains
+ * from the owning NvDisplay head device.
+ */
+&head2_legacy {
+	power-domains = <&bpmp TEGRA186_POWER_DOMAIN_DISP>,
+			<&bpmp TEGRA186_POWER_DOMAIN_DISPB>,
+			<&bpmp TEGRA186_POWER_DOMAIN_DISPC>,
+			<&bpmp TEGRA186_POWER_DOMAIN_DISP>,
+			<&bpmp TEGRA186_POWER_DOMAIN_DISP>;
+
+	power-domain-names = "disa", "disb", "disc", "dpaux", "sor";
+};
