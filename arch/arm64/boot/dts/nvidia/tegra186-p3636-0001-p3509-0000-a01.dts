@@ -4,6 +4,7 @@
 
 
 #include "tegra186.dtsi"
+#include "tegra186-p3636-0001-audio.dtsi"
 
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/mfd/max77620.h>
@@ -65,6 +66,47 @@
 
 /* Enable the Tegra186 security-engine TRNG used by the hwrng bridge. */
 &se {
+	status = "okay";
+};
+
+/* NVDEC requires KFUSE sensing during Falcon firmware bring-up. */
+&kfuse {
+	status = "okay";
+};
+
+/*
+ * Legacy nvhost allocates per-channel address spaces from the T186 host1x
+ * context StreamIDs. NVIDIA's R32 CVM DT enables all eight contexts.
+ */
+&host1x_ctx0 {
+	status = "okay";
+};
+
+&host1x_ctx1 {
+	status = "okay";
+};
+
+&host1x_ctx2 {
+	status = "okay";
+};
+
+&host1x_ctx3 {
+	status = "okay";
+};
+
+&host1x_ctx4 {
+	status = "okay";
+};
+
+&host1x_ctx5 {
+	status = "okay";
+};
+
+&host1x_ctx6 {
+	status = "okay";
+};
+
+&host1x_ctx7 {
 	status = "okay";
 };
 
@@ -708,4 +750,21 @@
 			>;
 		};
 	};
+};
+
+/* Tegra186 APE/NVADSP. The ADSP OS is preloaded from the adsp-fw partition. */
+&aconnect {
+	status = "okay";
+};
+
+&agic {
+	status = "okay";
+};
+
+&adsp {
+	status = "okay";
+};
+
+&tegra_adsp_audio {
+	status = "okay";
 };

@@ -9,6 +9,7 @@
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
+#include <linux/jiffies.h>
 #include <linux/poll.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -114,6 +115,30 @@ struct dma_fence *sync_file_get_fence(int fd)
 	return fence;
 }
 EXPORT_SYMBOL(sync_file_get_fence);
+
+/**
+ * sync_file_set_name - assign a userspace-visible name to a sync_file
+ * @fd: sync_file file descriptor
+ * @name: name to assign
+ *
+ * NVIDIA R32 userspace sets fence names through an nvhost control ioctl.
+ * The legacy Android sync framework stored the name directly in the fence,
+ * while the dma-fence based sync_file framework stores it in user_name.
+ */
+int sync_file_set_name(int fd, const char *name)
+{
+	struct sync_file *sync_file;
+
+	sync_file = sync_file_fdget(fd);
+	if (!sync_file)
+		return -EINVAL;
+
+	strlcpy(sync_file->user_name, name, sizeof(sync_file->user_name));
+	fput(sync_file->file);
+
+	return 0;
+}
+EXPORT_SYMBOL(sync_file_set_name);
 
 /**
  * sync_file_get_name - get the name of the sync_file
@@ -321,6 +346,117 @@ static __poll_t sync_file_poll(struct file *file, poll_table *wait)
 	return dma_fence_is_signaled(sync_file->fence) ? EPOLLIN : 0;
 }
 
+/*
+ * Android's pre-destaging sync ABI used ioctl opcodes 0, 1 and 2.
+ * NVIDIA R32 userspace still issues these commands.  Upstream intentionally
+ * burned those opcode numbers when sync_file was destaged, so accepting the
+ * old layouts here is unambiguous and does not alter the modern ABI.
+ */
+struct sync_merge_data_legacy {
+	__s32 fd2;
+	char name[32];
+	__s32 fence;
+};
+
+struct sync_pt_info_legacy {
+	__u32 len;
+	char obj_name[32];
+	char driver_name[32];
+	__s32 status;
+	__u64 timestamp_ns;
+	__u8 driver_data[0];
+};
+
+struct sync_fence_info_data_legacy {
+	__u32 len;
+	char name[32];
+	__s32 status;
+	__u8 pt_info[0];
+};
+
+/* NVIDIA R32 nvhost sync points expose this in sync_pt_info.driver_data. */
+struct nvhost_sync_fence_info_legacy {
+	__u32 id;
+	__u32 thresh;
+};
+
+#define SYNC_IOC_WAIT_LEGACY \
+	_IOW(SYNC_IOC_MAGIC, 0, __s32)
+#define SYNC_IOC_MERGE_LEGACY \
+	_IOWR(SYNC_IOC_MAGIC, 1, struct sync_merge_data_legacy)
+#define SYNC_IOC_FENCE_INFO_LEGACY \
+	_IOWR(SYNC_IOC_MAGIC, 2, struct sync_fence_info_data_legacy)
+
+static long sync_file_ioctl_wait_legacy(struct sync_file *sync_file,
+					unsigned long arg)
+{
+	__s32 timeout_ms;
+	long timeout, ret;
+	int status;
+
+	if (copy_from_user(&timeout_ms, (void __user *)arg, sizeof(timeout_ms)))
+		return -EFAULT;
+
+	timeout = timeout_ms < 0 ? MAX_SCHEDULE_TIMEOUT :
+		msecs_to_jiffies(timeout_ms);
+	ret = dma_fence_wait_timeout(sync_file->fence, true, timeout);
+	if (ret < 0)
+		return ret;
+	if (!ret)
+		return -ETIME;
+
+	status = dma_fence_get_status(sync_file->fence);
+	return status < 0 ? status : 0;
+}
+
+static long sync_file_ioctl_merge_legacy(struct sync_file *sync_file,
+					 unsigned long arg)
+{
+	struct sync_merge_data_legacy data;
+	struct sync_file *fence2, *fence3;
+	int fd, err;
+
+	fd = get_unused_fd_flags(O_CLOEXEC);
+	if (fd < 0)
+		return fd;
+
+	if (copy_from_user(&data, (void __user *)arg, sizeof(data))) {
+		err = -EFAULT;
+		goto err_put_fd;
+	}
+
+	fence2 = sync_file_fdget(data.fd2);
+	if (!fence2) {
+		err = -ENOENT;
+		goto err_put_fd;
+	}
+
+	data.name[sizeof(data.name) - 1] = '\0';
+	fence3 = sync_file_merge(data.name, sync_file, fence2);
+	if (!fence3) {
+		err = -ENOMEM;
+		goto err_put_fence2;
+	}
+
+	data.fence = fd;
+	if (copy_to_user((void __user *)arg, &data, sizeof(data))) {
+		err = -EFAULT;
+		goto err_put_fence3;
+	}
+
+	fd_install(fd, fence3->file);
+	fput(fence2->file);
+	return 0;
+
+err_put_fence3:
+	fput(fence3->file);
+err_put_fence2:
+	fput(fence2->file);
+err_put_fd:
+	put_unused_fd(fd);
+	return err;
+}
+
 static long sync_file_ioctl_merge(struct sync_file *sync_file,
 				  unsigned long arg)
 {
@@ -396,6 +532,88 @@ static int sync_fill_fence_info(struct dma_fence *fence,
 	return info->status;
 }
 
+static long sync_file_ioctl_fence_info_legacy(struct sync_file *sync_file,
+					      unsigned long arg)
+{
+	struct sync_fence_info_data_legacy *data;
+	struct dma_fence **fences;
+	__u32 size, len;
+	int num_fences, i, ret = 0;
+
+	if (copy_from_user(&size, (void __user *)arg, sizeof(size)))
+		return -EFAULT;
+
+	if (size < sizeof(*data))
+		return -EINVAL;
+	if (size > 4096)
+		size = 4096;
+
+	data = kzalloc(size, GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	sync_file_get_name(sync_file, data->name, sizeof(data->name));
+	data->status = dma_fence_get_status(sync_file->fence);
+	len = sizeof(*data);
+
+	fences = get_fences(sync_file, &num_fences);
+	for (i = 0; i < num_fences; i++) {
+		struct sync_pt_info_legacy *info;
+		struct dma_fence *fence = fences[i];
+		const char *driver_name = fence->ops->get_driver_name(fence);
+		const char *timeline_name = fence->ops->get_timeline_name(fence);
+		struct nvhost_sync_fence_info_legacy nvhost_info;
+		bool nvhost_fence = false;
+		u32 info_len = sizeof(*info);
+
+		/*
+		 * R32's nvhost Android-sync implementation appended
+		 * { syncpt_id, threshold } after struct sync_pt_info.
+		 * The dma-fence based replacement retains both values: the
+		 * timeline is named "sp<ID>" and seqno is the threshold.
+		 */
+		if (!strcmp(driver_name, "nvhost") &&
+		    sscanf(timeline_name, "sp%u", &nvhost_info.id) == 1) {
+			nvhost_info.thresh = (__u32)fence->seqno;
+			info_len += sizeof(nvhost_info);
+			nvhost_fence = true;
+		}
+
+		if (size - len < info_len) {
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		info = (void *)data + len;
+		info->len = info_len;
+		strlcpy(info->obj_name, timeline_name, sizeof(info->obj_name));
+		strlcpy(info->driver_name,
+			nvhost_fence ? "nvhost_sync" : driver_name,
+			sizeof(info->driver_name));
+		info->status = dma_fence_get_status(fence);
+
+		while (test_bit(DMA_FENCE_FLAG_SIGNALED_BIT, &fence->flags) &&
+		       !test_bit(DMA_FENCE_FLAG_TIMESTAMP_BIT, &fence->flags))
+			cpu_relax();
+		info->timestamp_ns =
+			test_bit(DMA_FENCE_FLAG_TIMESTAMP_BIT, &fence->flags) ?
+			ktime_to_ns(fence->timestamp) : 0;
+
+		if (info_len > sizeof(*info))
+			memcpy(info->driver_data, &nvhost_info, sizeof(nvhost_info));
+
+		len += info->len;
+	}
+
+	data->len = len;
+	if (copy_to_user((void __user *)arg, data, len))
+		ret = -EFAULT;
+
+out:
+	kfree(data);
+	return ret;
+}
+
 static long sync_file_ioctl_fence_info(struct sync_file *sync_file,
 				       unsigned long arg)
 {
@@ -466,6 +684,15 @@ static long sync_file_ioctl(struct file *file, unsigned int cmd,
 	struct sync_file *sync_file = file->private_data;
 
 	switch (cmd) {
+	case SYNC_IOC_WAIT_LEGACY:
+		return sync_file_ioctl_wait_legacy(sync_file, arg);
+
+	case SYNC_IOC_MERGE_LEGACY:
+		return sync_file_ioctl_merge_legacy(sync_file, arg);
+
+	case SYNC_IOC_FENCE_INFO_LEGACY:
+		return sync_file_ioctl_fence_info_legacy(sync_file, arg);
+
 	case SYNC_IOC_MERGE:
 		return sync_file_ioctl_merge(sync_file, arg);
 
