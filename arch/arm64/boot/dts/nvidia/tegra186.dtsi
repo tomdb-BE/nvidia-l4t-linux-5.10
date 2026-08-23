@@ -5,6 +5,7 @@
 #include <dt-bindings/interrupt-controller/tegra-t18x-agic.h>
 #include <dt-bindings/mailbox/tegra186-hsp.h>
 #include <dt-bindings/memory/tegra186-mc.h>
+#include <dt-bindings/pinctrl/pinctrl-tegra.h>
 #include <dt-bindings/pinctrl/pinctrl-tegra-io-pad.h>
 #include <dt-bindings/power/tegra186-powergate.h>
 #include <dt-bindings/reset/tegra186-reset.h>
@@ -187,6 +188,33 @@
 		clock-names = "axi_cbb";
 		timeout = <97000>;
 		status = "okay";
+	};
+
+	pinmux: pinmux@2430000 {
+		compatible = "nvidia,tegra186-pinmux";
+		reg = <0x0 0x02430000 0x0 0x15000>,
+		      <0x0 0x0c300000 0x0 0x4000>;
+		#gpio-range-cells = <3>;
+		status = "okay";
+
+		devslp_active_state: devslp-active {
+			sata {
+				nvidia,pins = "pex_l2_clkreq_n_pa6";
+				nvidia,function = "sata";
+				nvidia,pull = <TEGRA_PIN_PULL_NONE>;
+				nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+				nvidia,io-hv = <TEGRA_PIN_ENABLE>;
+				nvidia,low-power-mode = <TEGRA_PIN_ENABLE>;
+			};
+		};
+
+		devslp_pullup_state: devslp-pullup {
+			sata {
+				nvidia,pins = "pex_l2_clkreq_n_pa6";
+				nvidia,function = "sata";
+				nvidia,pull = <TEGRA_PIN_PULL_UP>;
+			};
+		};
 	};
 
 	/* Tegra186 PKA1/TRNG/RNG1 security engine. */
@@ -929,6 +957,48 @@
 		status = "disabled";
 	};
 
+	tegra_sata: ahci-sata@3507000 {
+		compatible = "nvidia,tegra186-ahci-sata";
+		reg = <0x0 0x03507000 0x0 0x00002000>,
+		      <0x0 0x03501000 0x0 0x00006000>,
+		      <0x0 0x03500000 0x0 0x00001000>,
+		      <0x0 0x03a90000 0x0 0x00010000>;
+		reg-names = "sata-ahci", "sata-config", "sata-ipfs", "sata-aux";
+		interrupts = <GIC_SPI 197 IRQ_TYPE_LEVEL_HIGH>;
+		iommus = <&smmu TEGRA186_SID_SATA>;
+		interconnects = <&mc TEGRA186_MEMORY_CLIENT_SATAR &emc>,
+		                <&mc TEGRA186_MEMORY_CLIENT_SATAW &emc>;
+		interconnect-names = "dma-mem", "write";
+		power-domains = <&bpmp TEGRA186_POWER_DOMAIN_SAX>;
+		clocks = <&bpmp TEGRA186_CLK_SATA>,
+		         <&bpmp TEGRA186_CLK_SATA_OOB>,
+		         <&bpmp TEGRA186_CLK_PLLP>,
+		         <&bpmp TEGRA186_CLK_PLLP_OUT0>;
+		clock-names = "sata", "sata-oob", "pllp", "pllp-uphy";
+		resets = <&bpmp TEGRA186_RESET_SATA>,
+		         <&bpmp TEGRA186_RESET_SATACOLD>;
+		reset-names = "sata", "sata-cold";
+		pinctrl-names = "devslp_active", "devslp_pullup";
+		pinctrl-0 = <&devslp_active_state>;
+		pinctrl-1 = <&devslp_pullup_state>;
+		nvidia,disable-features = "devslp", "dipm";
+		nvidia,link-flags = "min_power";
+		status = "disabled";
+
+		/* T186 SATA production settings from NVIDIA's 4.9 BSP. */
+		prod-settings {
+			#prod-cells = <4>;
+
+			prod {
+				prod = <
+					1 0x0000052c 0xffffffff 0x00031ce0
+					1 0x00000338 0x10000000 0x10000000
+				>;
+			};
+		};
+
+	};
+
 	hda@3510000 {
 		compatible = "nvidia,tegra186-hda", "nvidia,tegra30-hda";
 		reg = <0x0 0x03510000 0x0 0x10000>;
@@ -1656,6 +1726,22 @@
 					<&mc TEGRA186_MEMORY_CLIENT_VICSWR &emc>;
 			interconnect-names = "dma-mem", "write";
 			iommus = <&smmu TEGRA186_SID_VIC>;
+		};
+
+		nvjpg@15380000 {
+			compatible = "nvidia,tegra186-nvjpg";
+			reg = <0x15380000 0x40000>;
+			interrupts = <GIC_SPI 198 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&bpmp TEGRA186_CLK_NVJPG>;
+			clock-names = "nvjpg";
+			resets = <&bpmp TEGRA186_RESET_NVJPG>;
+			reset-names = "nvjpg";
+
+			power-domains = <&bpmp TEGRA186_POWER_DOMAIN_NVJPG>;
+			interconnects = <&mc TEGRA186_MEMORY_CLIENT_NVJPGSRD &emc>,
+					<&mc TEGRA186_MEMORY_CLIENT_NVJPGSWR &emc>;
+			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu TEGRA186_SID_NVJPG>;
 		};
 
 		dsib: dsi@15400000 {

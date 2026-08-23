@@ -1,0 +1,72 @@
+/*
+ * Tegra186 P3636 Raspberry Pi Camera v2 / IMX219 board wiring
+ */
+
+#include "tegra186-camera-rbpcv2-imx219.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+
+/*
+ * Tegra186 MAIN GPIO IDs:
+ *   C4 = 20
+ *   N0 = 104
+ *   N3 = 107
+ */
+
+&cam_i2c {
+	clock-frequency = <400000>;
+};
+
+&cam_i2cmux {
+	compatible = "i2c-mux-gpio";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	i2c-parent = <&cam_i2c>;
+	mux-gpios = <&gpio 20 GPIO_ACTIVE_HIGH>;
+};
+
+&i2c_0 {
+	reg = <0>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+};
+
+&i2c_1 {
+	reg = <1>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+};
+
+&imx219_cam0 {
+	reset-gpios = <&gpio 104 GPIO_ACTIVE_HIGH>;
+};
+
+&imx219_cam1 {
+	reset-gpios = <&gpio 107 GPIO_ACTIVE_HIGH>;
+};
+
+/*
+ * P3636 CSI/DSI analog rail.
+ *
+ * NVIDIA's 4.9 P3636 power tree supplies VI from SPMIC SD1 and tells
+ * NVCSI to request the "avdd_dsi_csi" regulator.
+ */
+&tegra_vi {
+	avdd_dsi_csi-supply = <&spmic_sd1>;
+};
+
+&tegra_nvcsi {
+	avdd_dsi_csi-supply = <&spmic_sd1>;
+	nvidia,csi_regulator = "avdd_dsi_csi";
+};
+
+&gpio {
+	camera-control-output-low {
+		gpio-hog;
+		output-low;
+		gpios = <104 GPIO_ACTIVE_HIGH
+			 107 GPIO_ACTIVE_HIGH>;
+		label = "cam0-pwdn", "cam1-pwdn";
+	};
+};
+
+#include "tegra186-camera-rtcpu-sce.dtsi"

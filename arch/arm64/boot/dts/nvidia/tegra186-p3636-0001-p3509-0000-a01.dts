@@ -4,6 +4,8 @@
 
 
 #include "tegra186.dtsi"
+#include "tegra186-camera-legacy.dtsi"
+#include "tegra186-camera-p3636-rbpcv2-imx219.dtsi"
 #include "tegra186-p3636-0001-audio.dtsi"
 
 #include <dt-bindings/interrupt-controller/irq.h>
@@ -769,5 +771,9 @@
 };
 
 &tegra_adsp_audio {
+	status = "okay";
+};
+
+&tegra_sata {
 	status = "okay";
 };

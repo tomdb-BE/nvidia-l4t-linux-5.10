@@ -1,0 +1,189 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Tegra186 Camera RTCPU on SCE for the legacy SM4/SM5 firmware protocol.
+ *
+ * Hardware resources and mailbox assignments are restored from NVIDIA's
+ * Tegra186 4.9 camera/SCE device tree.  Trace and IVC memory are allocated
+ * dynamically by the DMA/IOMMU layer and handed to SM5 firmware with
+ * RTCPU_CMD_CH_SETUP.  Keep the original T186 IOVA aperture reservation:
+ * the firmware accepts shared buffers in 0xa0000000..0xbfffffff and rejects
+ * the unconstrained high IOVAs otherwise chosen by the 5.10 allocator.
+ */
+
+/ {
+	aliases {
+		tegra-camera-rtcpu = &tegra_sce;
+	};
+
+	/*
+	 * Use a legacy-only compatible so this SCE HSP is claimed by NVIDIA's
+	 * tegra_hsp_sm_pair provider, not the upstream mailbox-controller driver.
+	 */
+	sce_hsp: tegra-hsp@b150000 {
+		compatible = "nvidia,tegra186-hsp-legacy";
+		reg = <0x0 0x0b150000 0x0 0x00090000>;
+		interrupts = <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 144 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "shared1", "shared2", "shared3", "shared4";
+		resets = <&bpmp TEGRA186_RESET_SCE_HSP>;
+		reset-names = "hsp";
+		status = "okay";
+	};
+
+	tegra_sce: rtcpu@b000000 {
+		compatible = "nvidia,tegra186-sce-ivc";
+		status = "okay";
+
+		reg = <0x0 0x0b000000 0x0 0x00001000>,
+		      <0x0 0x0b1f0000 0x0 0x00040000>,
+		      <0x0 0x0b230000 0x0 0x00010000>,
+		      <0x0 0x0b040000 0x0 0x00010000>,
+		      <0x0 0x0b050000 0x0 0x00010000>;
+		reg-names = "sce-evp", "sce-pm", "sce-cfg",
+			    "ast-cpu", "ast-dma";
+
+		iommus = <&smmu TEGRA186_SID_RCE>;
+
+		/*
+		 * Reserve everything outside the Camera RTCPU VM1 IOVA aperture.
+		 * 5.10 drivers/iommu/of_iommu.c still consumes this NVIDIA DT
+		 * property as <start,size> u64 pairs.  This leaves exactly
+		 * 0xa0000000..0xbfffffff available to dma_alloc_coherent().
+		 */
+		iommu-resv-regions = <0x0 0x00000000 0x0 0xa0000000
+				      0x0 0xc0000000 0xffffffff 0xffffffff>;
+
+		clocks = <&bpmp TEGRA186_CLK_SCE_APB>,
+			 <&bpmp TEGRA186_CLK_SCE_CPU_NIC>;
+		clock-names = "sce-apb", "sce-cpu-nic";
+		nvidia,clock-rates = <102000000 102000000>,
+				     <115200000 473600000>;
+
+		resets = <&bpmp TEGRA186_RESET_TSCTNSCE>,
+			 <&bpmp TEGRA186_RESET_SCE_PM>,
+			 <&bpmp TEGRA186_RESET_SCE_DBGRESETN>,
+			 <&bpmp TEGRA186_RESET_SCE_PRESETDBGN>,
+			 <&bpmp TEGRA186_RESET_SCE_ACTMON>,
+			 <&bpmp TEGRA186_RESET_SCE_DMA>,
+			 <&bpmp TEGRA186_RESET_SCE_TKE>,
+			 <&bpmp TEGRA186_RESET_SCE_GTE>,
+			 <&bpmp TEGRA186_RESET_SCE_CFG>,
+			 <&bpmp TEGRA186_RESET_SCE_NRESET>,
+			 <&bpmp TEGRA186_RESET_SCE_NSYSPORESET>;
+		reset-names = "tsctnsce", "sce-pm", "sce-dbgresetn",
+			      "sce-presetdbgn", "sce-actmon", "sce-dma",
+			      "sce-tke", "sce-gte", "sce-cfg",
+			      "sce-nreset", "sce-nsysporeset";
+
+		nvidia,reset-group-1 = "tsctnsce", "sce-pm", "sce-dbgresetn",
+				       "sce-presetdbgn", "sce-actmon", "sce-dma",
+				       "sce-tke", "sce-gte", "sce-cfg";
+		nvidia,reset-group-2 = "sce-nreset", "sce-nsysporeset";
+
+		/* Maximum memory bandwidth during SCE boot. */
+		nvidia,memory-bw = <0xffffffff>;
+
+		interrupts = <GIC_SPI 16 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "wdt-remote";
+
+		nvidia,trace = <&tegra_rtcpu_sce_trace 4 0x70100000 0x00100000>;
+		nvidia,ivc-channels = <&tegra_sce_ivc 2 0x90000000 0x00010000>;
+		nvidia,autosuspend-delay-ms = <5000>;
+
+		hsp {
+			compatible = "nvidia,tegra186-hsp-mailbox";
+			device = <&sce_hsp>;
+			nvidia,hsp-shared-mailbox = <&sce_hsp 1>, <&sce_hsp 6>;
+			nvidia,hsp-shared-mailbox-names = "ivc-pair", "cmd-pair";
+		};
+	};
+
+	tegra_rtcpu_sce_trace: tegra-rtcpu-sce-trace {
+		nvidia,enable-printk;
+		nvidia,interval-ms = <50>;
+		nvidia,log-prefix = "[SCE]";
+	};
+
+	tegra_sce_ivc: sce-ivc-channels {
+		echo@0 {
+			compatible = "nvidia,tegra-ivc-cdev";
+			nvidia,devname = "camchar-echo";
+			nvidia,service = "echo";
+			nvidia,version = <0>;
+			nvidia,group = <1>;
+			nvidia,frame-count = <16>;
+			nvidia,frame-size = <64>;
+		};
+
+		i2c@480 {
+			compatible = "nvidia,tegra186-camera-ivc-rpc-i2c-single";
+			nvidia,service = "i2c-single";
+			nvidia,version = <0>;
+			nvidia,group = <1>;
+			nvidia,frame-count = <8>;
+			nvidia,frame-size = <128>;
+			device = <&cam_i2c>;
+			status = "disabled";
+		};
+
+		vinotify@12c0 {
+			compatible = "nvidia,tegra186-camera-ivc-protocol-vinotify";
+			nvidia,service = "vinotify";
+			nvidia,version = <0>;
+			nvidia,group = <1>;
+			nvidia,frame-count = <64>;
+			nvidia,frame-size = <128>;
+			device = <&tegra_vi>;
+		};
+
+		mods@32c0 {
+			compatible = "nvidia,tegra186-camera-ivc-protocol-mods";
+			nvidia,service = "mods";
+			nvidia,version = <0>;
+			nvidia,group = <1>;
+			nvidia,frame-count = <1>;
+			nvidia,frame-size = <64>;
+		};
+
+		ivccontrol@52c0 {
+			compatible = "nvidia,tegra186-camera-ivc-protocol-capture-control";
+			nvidia,service = "capture-control";
+			nvidia,version = <0>;
+			nvidia,group = <1>;
+			nvidia,frame-count = <16>;
+			nvidia,frame-size = <320>;
+		};
+
+		ivccapture@72c0 {
+			compatible = "nvidia,tegra186-camera-ivc-protocol-capture";
+			nvidia,service = "capture";
+			nvidia,version = <0>;
+			nvidia,group = <1>;
+			nvidia,frame-count = <16>;
+			nvidia,frame-size = <64>;
+		};
+
+		dbg@7c00 {
+			compatible = "nvidia,tegra-ivc-cdev";
+			nvidia,devname = "camchar-dbg";
+			nvidia,service = "debug";
+			nvidia,version = <0>;
+			nvidia,group = <1>;
+			nvidia,frame-count = <1>;
+			nvidia,frame-size = <384>;
+		};
+
+		dbg@7e00 {
+			compatible = "nvidia,tegra186-camera-ivc-protocol-debug";
+			nvidia,service = "debug";
+			nvidia,version = <0>;
+			nvidia,group = <1>;
+			nvidia,frame-count = <1>;
+			nvidia,frame-size = <8192>;
+			nvidia,ivc-timeout = <50>;
+			nvidia,test-timeout = <5000>;
+		};
+	};
+};
