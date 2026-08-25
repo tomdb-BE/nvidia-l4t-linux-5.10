@@ -24,10 +24,104 @@
 		status = "okay";
 	};
 
+	tegra186_system_config: generic-system-config {
+		compatible = "nvidia,tegra186-system-config";
+		status = "disabled";
+	};
+
 	misc@100000 {
 		compatible = "nvidia,tegra186-misc";
 		reg = <0x0 0x00100000 0x0 0xf000>,
 		      <0x0 0x0010f000 0x0 0x1000>;
+	};
+
+
+	tegra_pwm1: pwm@3280000 {
+		compatible = "nvidia,tegra186-pwm";
+		reg = <0x0 0x03280000 0x0 0x10000>;
+		clocks = <&bpmp TEGRA186_CLK_PWM1>;
+		clock-names = "pwm";
+		resets = <&bpmp TEGRA186_RESET_PWM1>;
+		reset-names = "pwm";
+		#pwm-cells = <2>;
+		status = "disabled";
+	};
+
+	tegra_pwm2: pwm@3290000 {
+		compatible = "nvidia,tegra186-pwm";
+		reg = <0x0 0x03290000 0x0 0x10000>;
+		clocks = <&bpmp TEGRA186_CLK_PWM2>;
+		clock-names = "pwm";
+		resets = <&bpmp TEGRA186_RESET_PWM2>;
+		reset-names = "pwm";
+		#pwm-cells = <2>;
+		status = "disabled";
+	};
+
+	tegra_pwm3: pwm@32a0000 {
+		compatible = "nvidia,tegra186-pwm";
+		reg = <0x0 0x032a0000 0x0 0x10000>;
+		clocks = <&bpmp TEGRA186_CLK_PWM3>;
+		clock-names = "pwm";
+		resets = <&bpmp TEGRA186_RESET_PWM3>;
+		reset-names = "pwm";
+		#pwm-cells = <2>;
+		status = "disabled";
+	};
+
+	tegra_pwm4: pwm@c340000 {
+		compatible = "nvidia,tegra186-pwm";
+		reg = <0x0 0x0c340000 0x0 0x10000>;
+		clocks = <&bpmp TEGRA186_CLK_PWM4>;
+		clock-names = "pwm";
+		resets = <&bpmp TEGRA186_RESET_PWM4>;
+		reset-names = "pwm";
+		#pwm-cells = <2>;
+		status = "disabled";
+	};
+
+	tegra_pwm5: pwm@32c0000 {
+		compatible = "nvidia,tegra186-pwm";
+		reg = <0x0 0x032c0000 0x0 0x10000>;
+		clocks = <&bpmp TEGRA186_CLK_PWM5>;
+		clock-names = "pwm";
+		resets = <&bpmp TEGRA186_RESET_PWM5>;
+		reset-names = "pwm";
+		#pwm-cells = <2>;
+		status = "disabled";
+	};
+
+	tegra_pwm6: pwm@32d0000 {
+		compatible = "nvidia,tegra186-pwm";
+		reg = <0x0 0x032d0000 0x0 0x10000>;
+		clocks = <&bpmp TEGRA186_CLK_PWM6>;
+		clock-names = "pwm";
+		resets = <&bpmp TEGRA186_RESET_PWM6>;
+		reset-names = "pwm";
+		#pwm-cells = <2>;
+		status = "disabled";
+	};
+
+	tegra_pwm7: pwm@32e0000 {
+		compatible = "nvidia,tegra186-pwm";
+		reg = <0x0 0x032e0000 0x0 0x10000>;
+		clocks = <&bpmp TEGRA186_CLK_PWM7>;
+		clock-names = "pwm";
+		resets = <&bpmp TEGRA186_RESET_PWM7>;
+		reset-names = "pwm";
+		#pwm-cells = <2>;
+		status = "disabled";
+	};
+
+	tegra_pwm8: pwm@32f0000 {
+		compatible = "nvidia,tegra186-pwm";
+		reg = <0x0 0x032f0000 0x0 0x10000>;
+		clocks = <&bpmp TEGRA186_CLK_PWM8>;
+		clock-names = "pwm";
+		resets = <&bpmp TEGRA186_RESET_PWM8>;
+		reset-names = "pwm";
+		#pwm-cells = <2>;
+		status = "disabled";
 	};
 
 	gpio: gpio@2200000 {
@@ -1288,6 +1382,19 @@
 		#interrupt-cells = <2>;
 	};
 
+	tegra_tachometer: tachometer@39c0000 {
+		compatible = "nvidia,pwm-tegra186-tachometer";
+		reg = <0x0 0x039c0000 0x0 0x10>;
+		clocks = <&bpmp TEGRA186_CLK_TACH>;
+		clock-names = "tach";
+		resets = <&bpmp TEGRA186_RESET_TACH>;
+		reset-names = "tach";
+		#pwm-cells = <2>;
+		pulse-per-rev = <2>;
+		capture-window-length = <8>;
+		status = "disabled";
+	};
+
 	pmc: pmc@c360000 {
 		compatible = "nvidia,tegra186-pmc";
 		reg = <0 0x0c360000 0 0x10000>,
@@ -1328,6 +1435,12 @@
 			pins = "sdmmc3-hv";
 			power-source = <TEGRA_IO_PAD_VOLTAGE_1V8>;
 		};
+	};
+
+	roc_flush: roc-flush@e080000 {
+		compatible = "nvidia,tegra186-roc-flush";
+		reg = <0x0 0x0e080000 0x0 0x10000>;
+		status = "disabled";
 	};
 
 	ccplex@e000000 {
@@ -2121,6 +2234,14 @@
 			cache-line-size = <64>;
 			cache-sets = <2048>;
 		};
+	};
+
+	soctherm_oc_event: soctherm-oc-event {
+		compatible = "nvidia,tegra186-oc-event";
+		interrupts = <GIC_SPI 137 IRQ_TYPE_LEVEL_HIGH>;
+		reg = <0x0 0x0d280000 0x0 0x0a40>,
+		      <0x0 0x0d170000 0x0 0x0004>;
+		status = "okay";
 	};
 
 	thermal-zones {

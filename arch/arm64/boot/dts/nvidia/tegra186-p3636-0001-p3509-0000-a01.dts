@@ -7,17 +7,85 @@
 #include "tegra186-camera-legacy.dtsi"
 #include "tegra186-camera-p3636-rbpcv2-imx219.dtsi"
 #include "tegra186-p3636-0001-audio.dtsi"
+#include "tegra186-p3636-0001-pwm-fan.dtsi"
 
+#include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/mfd/max77620.h>
 #include "tegra186-p3636-0001-display.dtsi"
 #include "tegra186-p3636-0001-display-imp.dtsi"
+#include "tegra186-p3636-0001-balanced-throttle.dtsi"
+#include "tegra186-p3636-0001-power-tree.dtsi"
 
 / {
 	model = "NVIDIA Jetson TX2 NX P3636-0001 on P3509-0000";
 	compatible = "nvidia,p3509-0000+p3636-0001",
 		     "nvidia,p3636-0001",
 		     "nvidia,tegra186";
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		power-key {
+			label = "power-key";
+			gpios = <&gpio_aon TEGRA_AON_GPIO(FF, 0) GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_POWER>;
+			wakeup-source;
+		};
+	};
+
+	thermal_fan_est_shared_data: tfesd {
+		secret = <37>;
+		toffset = <0>;
+		polling_period = <1100>;
+		ndevs = <3>;
+		cdev_type = "pwm-fan";
+		tzp_governor_name = "pid_thermal_gov";
+
+		dev1 {
+			/* R32 BCPU-therm: Denver cluster. */
+			dev_data = "denver";
+			coeffs = <30 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>;
+		};
+
+		dev2 {
+			/* R32 MCPU-therm: Cortex-A57 cluster. */
+			dev_data = "a57";
+			coeffs = <30 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>;
+		};
+
+		dev3 {
+			/* R32 GPU-therm. */
+			dev_data = "gpu";
+			coeffs = <40 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>;
+		};
+	};
+
+	thermal_fan_est: thermal-fan-est {
+		compatible = "thermal-fan-est";
+		name = "thermal-fan-est";
+		num_resources = <0>;
+		shared_data = <&thermal_fan_est_shared_data>;
+		trip_length = <10>;
+
+		profiles {
+			default = "quiet";
+
+			quiet {
+				active_trip_temps = <0 46000 60000 68000 76000
+					140000 150000 160000 170000 180000>;
+				active_hysteresis = <0 8000 8000 7000 7000
+					0 0 0 0 0>;
+			};
+
+			cool {
+				active_trip_temps = <0 35000 45000 53000 61000
+					140000 150000 160000 170000 180000>;
+				active_hysteresis = <0 8000 8000 7000 7000
+					0 0 0 0 0>;
+			};
+		};
+	};
 
 
 
@@ -65,8 +133,97 @@
 	};
 };
 
+&rtc {
+	status = "okay";
+};
+
 &uarta {
 	status = "okay";
+};
+
+/*
+ * P3636 XUSB enablement.
+ *
+ * Restore the native Tegra186 XUSB lanes used by the original P3636
+ * platform.  For the Turing Pi 2 use case USB2-0 is forced to host mode
+ * instead of OTG so a USB device selected by the BMC switch enumerates
+ * directly on the Tegra XHCI controller.
+ */
+&padctl {
+	status = "okay";
+
+	interrupts = <GIC_SPI 167 IRQ_TYPE_LEVEL_HIGH>;
+
+	pads {
+		usb2 {
+			status = "okay";
+
+			lanes {
+				usb2-0 {
+					nvidia,function = "xusb";
+					status = "okay";
+				};
+
+				usb2-1 {
+					nvidia,function = "xusb";
+					status = "okay";
+				};
+
+				usb2-2 {
+					nvidia,function = "xusb";
+					status = "okay";
+				};
+			};
+		};
+
+		usb3 {
+			status = "okay";
+
+			lanes {
+				usb3-1 {
+					nvidia,function = "xusb";
+					status = "okay";
+				};
+			};
+		};
+	};
+
+	ports {
+		usb2-0 {
+			status = "okay";
+			mode = "host";
+		};
+
+		usb2-1 {
+			status = "okay";
+			mode = "host";
+		};
+
+		usb2-2 {
+			status = "okay";
+			mode = "host";
+		};
+
+		usb3-1 {
+			nvidia,usb2-companion = <1>;
+			status = "okay";
+		};
+	};
+};
+
+&{/usb@3530000} {
+	status = "okay";
+
+	phys = <&{/padctl@3520000/pads/usb2/lanes/usb2-0}>,
+	       <&{/padctl@3520000/pads/usb2/lanes/usb2-1}>,
+	       <&{/padctl@3520000/pads/usb2/lanes/usb2-2}>,
+	       <&{/padctl@3520000/pads/usb3/lanes/usb3-1}>;
+
+	phy-names = "usb2-0", "usb2-1", "usb2-2", "usb3-1";
+};
+
+&{/usb@3550000} {
+	status = "disabled";
 };
 
 /* Enable the Tegra186 security-engine TRNG used by the hwrng bridge. */
@@ -635,6 +792,17 @@
 
 &pmc {
 	nvidia,invert-interrupt;
+	nvidia,restrict-voltage-switch;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&p3636_iopad_defaults>;
+
+	p3636_iopad_defaults: iopad-defaults {
+		sdmmc-io-pads {
+			pins = "sdmmc1-hv", "sdmmc2-hv", "sdmmc3-hv";
+			nvidia,enable-voltage-switching;
+		};
+	};
 };
 
 
@@ -775,5 +943,27 @@
 };
 
 &tegra_sata {
+	status = "okay";
+};
+
+/* NVIDIA's P3636 board enables the four PWM controllers used on the module/CVB. */
+&tegra_pwm1 {
+	status = "okay";
+};
+
+&tegra_pwm2 {
+	status = "okay";
+};
+
+&tegra_pwm3 {
+	status = "okay";
+};
+
+&tegra_pwm4 {
+	status = "okay";
+};
+
+/* P3636 fan tachometer input. The 5.10 driver exposes RPM through hwmon. */
+&tegra_tachometer {
 	status = "okay";
 };

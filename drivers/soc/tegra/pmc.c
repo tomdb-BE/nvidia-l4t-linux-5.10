@@ -44,6 +44,7 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/syscore_ops.h>
 #include <linux/regmap.h>
 #include <linux/notifier.h>
 #include <linux/regulator/consumer.h>
@@ -70,6 +71,7 @@
 #define  PMC_CNTRL_CPU_PWRREQ_POLARITY	BIT(15) /* CPU pwr req polarity */
 #define  PMC_CNTRL_SIDE_EFFECT_LP0	BIT(14) /* LP0 when CPU pwr gated */
 #define  PMC_CNTRL_SYSCLK_OE		BIT(11) /* system clock enable */
+#define  PMC_CNTRL_PWRREQ_OE		BIT(9)  /* core power req enable */
 #define  PMC_CNTRL_SYSCLK_POLARITY	BIT(10) /* sys clk polarity */
 #define  PMC_CNTRL_PWRREQ_POLARITY	BIT(8)
 #define  PMC_CNTRL_BLINK_EN		7
@@ -374,6 +376,7 @@
 #define WAKE_NR_EVENTS	96
 #define WAKE_NR_VECTORS	(WAKE_NR_EVENTS / 32)
 
+static u32 wke_wake_enb[WAKE_NR_VECTORS];
 static u32 wke_wake_level[WAKE_NR_VECTORS];
 static u32 wke_wake_level_any[WAKE_NR_VECTORS];
 
@@ -3979,6 +3982,12 @@ static int tegra186_pmc_irq_set_wake(struct irq_data *data, unsigned int on)
 
 	writel(value, pmc->wake + WAKE_AOWAKE_TIER2_ROUTING(offset));
 
+	/* Track enabled wake events and program the live hardware state. */
+	if (on)
+		wk_set_bit(data->hwirq, wke_wake_enb);
+	else
+		wk_clr_bit(data->hwirq, wke_wake_enb);
+
 	/* enable wakeup event */
 	writel(!!on, pmc->wake + WAKE_AOWAKE_MASK_W(data->hwirq));
 
@@ -4435,6 +4444,10 @@ static int tegra_pmc_regmap_init(struct tegra_pmc *pmc)
 	return 0;
 }
 
+#if defined(CONFIG_PM_SLEEP) && (defined(CONFIG_ARM) || defined(CONFIG_ARM64))
+static struct syscore_ops tegra186_pmc_syscore_ops;
+#endif
+
 static int tegra_pmc_probe(struct platform_device *pdev)
 {
 	void __iomem *base;
@@ -4617,6 +4630,11 @@ static int tegra_pmc_probe(struct platform_device *pdev)
 	if (pmc->soc->set_wake_filters)
 		pmc->soc->set_wake_filters(pmc);
 
+#if defined(CONFIG_PM_SLEEP) && (defined(CONFIG_ARM) || defined(CONFIG_ARM64))
+	/* Restore the original T186 PM-IRQ syscore suspend ordering. */
+	if (of_device_is_compatible(pdev->dev.of_node, "nvidia,tegra186-pmc"))
+		register_syscore_ops(&tegra186_pmc_syscore_ops);
+#endif
 
 	return 0;
 
@@ -4664,6 +4682,23 @@ static void wke_write_wake_levels(u32 *lvl)
 
 	for (i = 0; i < WAKE_NR_EVENTS; i++)
 		wke_write_wake_level(i, wk_test_bit(i, lvl));
+}
+
+static void wke_write_wake_masks(u32 *enb)
+{
+	int i;
+
+	for (i = 0; i < WAKE_NR_EVENTS; i++)
+		writel(wk_test_bit(i, enb),
+		       pmc->wake + WAKE_AOWAKE_MASK_W(i));
+}
+
+static void wke_write_tier2_routing(u32 *enb)
+{
+	int i;
+
+	for (i = 0; i < WAKE_NR_VECTORS; i++)
+		writel(enb[i], pmc->wake + WAKE_AOWAKE_TIER2_ROUTING(i));
 }
 
 static void wke_clear_sw_wake_status(void)
@@ -4740,7 +4775,16 @@ static int tegra_pmc_suspend(struct device *dev)
 	/* Clear PMC Wake Status registers while going to suspend */
 	wke_clear_wake_status();
 
+	/*
+	 * Reprogram the complete SC7 wake state immediately before entering
+	 * suspend.  Tegra186 wake registers live in the always-on domain and
+	 * NVIDIA's 4.9 implementation rewrites both per-event masks and Tier-2
+	 * routing here instead of relying solely on earlier irq_set_wake()
+	 * transactions.
+	 */
 	wke_write_wake_levels(wake_level);
+	wke_write_wake_masks(wke_wake_enb);
+	wke_write_tier2_routing(wke_wake_enb);
 
 	if (pmc->soc->soc_is_tegra210_n_before) {
 		struct tegra_pmc *pmc = dev_get_drvdata(dev);
@@ -4800,6 +4844,26 @@ static int tegra_pmc_resume(struct device *dev)
 	}
 	return 0;
 }
+
+static int tegra186_pmc_syscore_suspend(void)
+{
+	/*
+	 * NVIDIA's 4.9 T186 PM IRQ implementation programs the final
+	 * AOWAKE levels, masks and Tier-2 routing from a syscore suspend
+	 * callback.  That ordering is important: device suspend callbacks
+	 * such as MAX77620 RTC enable their wake IRQs after the PMC platform
+	 * device may already have run its regular ->suspend() callback.
+	 *
+	 * Re-run the PMC wake-state programming here, after device suspend
+	 * has completed, so wke_wake_enb contains every late enable_irq_wake()
+	 * request before SC7 is entered.
+	 */
+	return tegra_pmc_suspend(pmc->dev);
+}
+
+static struct syscore_ops tegra186_pmc_syscore_ops = {
+	.suspend = tegra186_pmc_syscore_suspend,
+};
 
 static SIMPLE_DEV_PM_OPS(tegra_pmc_pm_ops, tegra_pmc_suspend, tegra_pmc_resume);
 
@@ -5608,6 +5672,22 @@ static void tegra186_pmc_setup_irq_polarity(struct tegra_pmc *pmc,
 
 	writel(value, wake + WAKE_AOWAKE_CTRL);
 
+	/*
+	 * Tegra186 routes the PMIC interrupt through AOWAKE event 24.
+	 * NVIDIA's 4.9 tegra186-aowake driver programmed the PMU_INT
+	 * wake level separately from the global AOWAKE interrupt polarity.
+	 * Preserve that hardware requirement now that the AOWAKE block is
+	 * owned by the consolidated PMC driver.
+	 */
+	value = readl(wake + WAKE_AOWAKE_CNTRL(24));
+
+	if (invert)
+		value &= ~WAKE_AOWAKE_CNTRL_LEVEL;
+	else
+		value |= WAKE_AOWAKE_CNTRL_LEVEL;
+
+	writel(value, wake + WAKE_AOWAKE_CNTRL(24));
+
 	iounmap(wake);
 }
 
@@ -5634,10 +5714,100 @@ static const char * const tegra186_reset_levels[] = {
 };
 
 static const struct tegra_wake_event tegra186_wake_events[] = {
+	TEGRA_WAKE_GPIO("main_gpio_a6", 0, 0, TEGRA186_MAIN_GPIO(A, 6)),
+	TEGRA_WAKE_GPIO("main_gpio_a2", 1, 0, TEGRA186_MAIN_GPIO(A, 2)),
+	TEGRA_WAKE_GPIO("main_gpio_a5", 2, 0, TEGRA186_MAIN_GPIO(A, 5)),
+	TEGRA_WAKE_GPIO("main_gpio_d3", 3, 0, TEGRA186_MAIN_GPIO(D, 3)),
+	TEGRA_WAKE_GPIO("main_gpio_e3", 4, 0, TEGRA186_MAIN_GPIO(E, 3)),
+	TEGRA_WAKE_GPIO("main_gpio_g3", 5, 0, TEGRA186_MAIN_GPIO(G, 3)),
+	TEGRA_WAKE_GPIO("main_gpio_b3", 7, 0, TEGRA186_MAIN_GPIO(B, 3)),
+	TEGRA_WAKE_GPIO("main_gpio_b5", 8, 0, TEGRA186_MAIN_GPIO(B, 5)),
+	TEGRA_WAKE_GPIO("main_gpio_c0", 9, 0, TEGRA186_MAIN_GPIO(C, 0)),
+	TEGRA_WAKE_GPIO("aon_gpio_s2", 10, 1, TEGRA186_AON_GPIO(S, 2)),
+	TEGRA_WAKE_GPIO("main_gpio_h2", 11, 0, TEGRA186_MAIN_GPIO(H, 2)),
+	TEGRA_WAKE_GPIO("main_gpio_j5", 12, 0, TEGRA186_MAIN_GPIO(J, 5)),
+	TEGRA_WAKE_GPIO("main_gpio_j6", 13, 0, TEGRA186_MAIN_GPIO(J, 6)),
+	TEGRA_WAKE_GPIO("main_gpio_j7", 14, 0, TEGRA186_MAIN_GPIO(J, 7)),
+	TEGRA_WAKE_GPIO("main_gpio_k0", 15, 0, TEGRA186_MAIN_GPIO(K, 0)),
+	TEGRA_WAKE_GPIO("main_gpio_q1", 16, 0, TEGRA186_MAIN_GPIO(Q, 1)),
+	TEGRA_WAKE_GPIO("main_gpio_f4", 17, 0, TEGRA186_MAIN_GPIO(F, 4)),
+	TEGRA_WAKE_GPIO("main_gpio_m5", 18, 0, TEGRA186_MAIN_GPIO(M, 5)),
+	TEGRA_WAKE_GPIO("main_gpio_p0", 19, 0, TEGRA186_MAIN_GPIO(P, 0)),
+	TEGRA_WAKE_GPIO("main_gpio_p2", 20, 0, TEGRA186_MAIN_GPIO(P, 2)),
+	TEGRA_WAKE_GPIO("main_gpio_p1", 21, 0, TEGRA186_MAIN_GPIO(P, 1)),
+	TEGRA_WAKE_GPIO("main_gpio_o3", 22, 0, TEGRA186_MAIN_GPIO(O, 3)),
+	TEGRA_WAKE_GPIO("main_gpio_r5", 23, 0, TEGRA186_MAIN_GPIO(R, 5)),
 	TEGRA_WAKE_IRQ("pmu", 24, 209),
+	TEGRA_WAKE_GPIO("aon_gpio_s3", 25, 1, TEGRA186_AON_GPIO(S, 3)),
+	TEGRA_WAKE_GPIO("aon_gpio_s4", 26, 1, TEGRA186_AON_GPIO(S, 4)),
+	TEGRA_WAKE_GPIO("aon_gpio_s1", 27, 1, TEGRA186_AON_GPIO(S, 1)),
+	TEGRA_WAKE_GPIO("main_gpio_f2", 28, 0, TEGRA186_MAIN_GPIO(F, 2)),
 	TEGRA_WAKE_GPIO("power", 29, 1, TEGRA186_AON_GPIO(FF, 0)),
+	TEGRA_WAKE_GPIO("aon_gpio_ff4", 30, 1, TEGRA186_AON_GPIO(FF, 4)),
+	TEGRA_WAKE_GPIO("main_gpio_c6", 31, 0, TEGRA186_MAIN_GPIO(C, 6)),
+	TEGRA_WAKE_GPIO("aon_gpio_w2", 32, 1, TEGRA186_AON_GPIO(W, 2)),
+	TEGRA_WAKE_GPIO("aon_gpio_w5", 33, 1, TEGRA186_AON_GPIO(W, 5)),
+	TEGRA_WAKE_GPIO("aon_gpio_w1", 34, 1, TEGRA186_AON_GPIO(W, 1)),
+	TEGRA_WAKE_GPIO("aon_gpio_v0", 35, 1, TEGRA186_AON_GPIO(V, 0)),
+	TEGRA_WAKE_GPIO("aon_gpio_v1", 36, 1, TEGRA186_AON_GPIO(V, 1)),
+	TEGRA_WAKE_GPIO("aon_gpio_v2", 37, 1, TEGRA186_AON_GPIO(V, 2)),
+	TEGRA_WAKE_GPIO("aon_gpio_v3", 38, 1, TEGRA186_AON_GPIO(V, 3)),
+	TEGRA_WAKE_GPIO("aon_gpio_v4", 39, 1, TEGRA186_AON_GPIO(V, 4)),
+	TEGRA_WAKE_GPIO("aon_gpio_v5", 40, 1, TEGRA186_AON_GPIO(V, 5)),
+	TEGRA_WAKE_GPIO("aon_gpio_ee0", 41, 1, TEGRA186_AON_GPIO(EE, 0)),
+	TEGRA_WAKE_GPIO("aon_gpio_z1", 42, 1, TEGRA186_AON_GPIO(Z, 1)),
+	TEGRA_WAKE_GPIO("aon_gpio_z3", 43, 1, TEGRA186_AON_GPIO(Z, 3)),
+	TEGRA_WAKE_GPIO("aon_gpio_aa0", 44, 1, TEGRA186_AON_GPIO(AA, 0)),
+	TEGRA_WAKE_GPIO("aon_gpio_aa1", 45, 1, TEGRA186_AON_GPIO(AA, 1)),
+	TEGRA_WAKE_GPIO("aon_gpio_aa2", 46, 1, TEGRA186_AON_GPIO(AA, 2)),
+	TEGRA_WAKE_GPIO("aon_gpio_aa3", 47, 1, TEGRA186_AON_GPIO(AA, 3)),
+	TEGRA_WAKE_GPIO("aon_gpio_aa4", 48, 1, TEGRA186_AON_GPIO(AA, 4)),
+	TEGRA_WAKE_GPIO("aon_gpio_aa5", 49, 1, TEGRA186_AON_GPIO(AA, 5)),
+	TEGRA_WAKE_GPIO("aon_gpio_aa6", 50, 1, TEGRA186_AON_GPIO(AA, 6)),
+	TEGRA_WAKE_GPIO("aon_gpio_aa7", 51, 1, TEGRA186_AON_GPIO(AA, 7)),
+	TEGRA_WAKE_GPIO("main_gpio_x3", 52, 0, TEGRA186_MAIN_GPIO(X, 3)),
+	TEGRA_WAKE_GPIO("main_gpio_x7", 53, 0, TEGRA186_MAIN_GPIO(X, 7)),
+	TEGRA_WAKE_GPIO("main_gpio_y0", 54, 0, TEGRA186_MAIN_GPIO(Y, 0)),
+	TEGRA_WAKE_GPIO("main_gpio_y1", 55, 0, TEGRA186_MAIN_GPIO(Y, 1)),
+	TEGRA_WAKE_GPIO("main_gpio_y2", 56, 0, TEGRA186_MAIN_GPIO(Y, 2)),
+	TEGRA_WAKE_GPIO("main_gpio_y5", 57, 0, TEGRA186_MAIN_GPIO(Y, 5)),
+	TEGRA_WAKE_GPIO("main_gpio_y6", 58, 0, TEGRA186_MAIN_GPIO(Y, 6)),
+	TEGRA_WAKE_GPIO("main_gpio_l1", 59, 0, TEGRA186_MAIN_GPIO(L, 1)),
+	TEGRA_WAKE_GPIO("main_gpio_l3", 60, 0, TEGRA186_MAIN_GPIO(L, 3)),
+	TEGRA_WAKE_GPIO("main_gpio_l4", 61, 0, TEGRA186_MAIN_GPIO(L, 4)),
+	TEGRA_WAKE_GPIO("main_gpio_l5", 62, 0, TEGRA186_MAIN_GPIO(L, 5)),
+	TEGRA_WAKE_GPIO("main_gpio_i4", 63, 0, TEGRA186_MAIN_GPIO(I, 4)),
+	TEGRA_WAKE_GPIO("main_gpio_i6", 64, 0, TEGRA186_MAIN_GPIO(I, 6)),
+	TEGRA_WAKE_GPIO("aon_gpio_z0", 65, 1, TEGRA186_AON_GPIO(Z, 0)),
+	TEGRA_WAKE_GPIO("aon_gpio_z2", 66, 1, TEGRA186_AON_GPIO(Z, 2)),
+	TEGRA_WAKE_GPIO("aon_gpio_ff1", 67, 1, TEGRA186_AON_GPIO(FF, 1)),
+	TEGRA_WAKE_GPIO("aon_gpio_ff2", 68, 1, TEGRA186_AON_GPIO(FF, 2)),
+	TEGRA_WAKE_GPIO("aon_gpio_ff3", 69, 1, TEGRA186_AON_GPIO(FF, 3)),
+	TEGRA_WAKE_GPIO("main_gpio_h3", 70, 0, TEGRA186_MAIN_GPIO(H, 3)),
+	TEGRA_WAKE_GPIO("main_gpio_p5", 71, 0, TEGRA186_MAIN_GPIO(P, 5)),
+	TEGRA_WAKE_IRQ("aotag2pmc", 72, 279),
 	TEGRA_WAKE_IRQ("rtc", 73, 10),
+	TEGRA_WAKE_IRQ("aovc", 74, 215),
+	TEGRA_WAKE_IRQ("aowdt", 75, 18),
+	TEGRA_WAKE_IRQ("xusb0", 76, 167),
+	TEGRA_WAKE_IRQ("xusb1", 77, 167),
+	TEGRA_WAKE_IRQ("xusb2", 78, 167),
+	TEGRA_WAKE_IRQ("xusb3", 79, 167),
+	TEGRA_WAKE_IRQ("xusb4", 80, 167),
+	TEGRA_WAKE_IRQ("xusb5", 81, 167),
+	TEGRA_WAKE_IRQ("xusb6", 82, 167),
 	TEGRA_WAKE_IRQ("sw_wake", 83, 19),
+	TEGRA_WAKE_IRQ("spe_wdt", 84, 15),
+	TEGRA_WAKE_IRQ("aovic_fiq", 85, 21),
+	TEGRA_WAKE_IRQ("aovic_irq", 86, 22),
+	TEGRA_WAKE_IRQ("aon_gpio_0", 87, 60),
+	TEGRA_WAKE_IRQ("aon_gpio_1", 88, 61),
+	TEGRA_WAKE_IRQ("vfmon", 89, 280),
+	TEGRA_WAKE_IRQ("aopm", 90, 26),
+	TEGRA_WAKE_IRQ("pmc2lic", 92, 211),
+	TEGRA_WAKE_IRQ("ao_debug", 93, 29),
+	TEGRA_WAKE_IRQ("aopm2lic", 94, 30),
+	TEGRA_WAKE_IRQ("aon_car", 95, 226),
 };
 
 static const struct tegra_pmc_soc tegra186_pmc_soc = {
@@ -6427,6 +6597,9 @@ static int tegra_pmc_iopower_probe(struct platform_device *pdev)
 						  &pmc->soc->io_pads[i],
 						  &pwrio_disabled_mask,
 						  enable_pad_volt_config);
+		if (ret == -EPROBE_DEFER)
+			return ret;
+
 		if (ret < 0)
 			dev_info(dev, "io-power cell %s init failed: %d\n",
 				 pmc->soc->io_pads[i].name, ret);

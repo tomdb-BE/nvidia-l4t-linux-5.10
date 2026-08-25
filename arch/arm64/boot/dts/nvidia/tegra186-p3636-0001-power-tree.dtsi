@@ -1,0 +1,247 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * P3636/P3509 regulator and IO-power topology ported from NVIDIA L4T 4.9.
+ *
+ * Keep PMIC FPS/ramp programming in the main P3636 board DTS; it is already
+ * present in the 5.10 port.  This file restores the missing fixed rails and
+ * consumer relationships.
+ */
+
+#include <dt-bindings/soc/tegra-io-pads.h>
+
+/ {
+	fixed-regulators {
+		compatible = "simple-bus";
+		device_type = "fixed-regulators";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		hdr40_vdd_3v3: vdd_3v3: p3509_vdd_3v3_cvb: regulator@101 {
+			compatible = "regulator-fixed";
+			reg = <101>;
+			regulator-name = "vdd-3v3-cvb";
+			regulator-min-microvolt = <3300000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		p3509_vdd_1v8_cvb: regulator@102 {
+			compatible = "regulator-fixed";
+			reg = <102>;
+			regulator-name = "vdd-1v8-cvb";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		p3509_vdd_fan: regulator@111 {
+			compatible = "regulator-fixed";
+			reg = <111>;
+			regulator-name = "vdd-fan";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+		};
+
+		p3509_vdd_hdmi_5v0: regulator@112 {
+			compatible = "regulator-fixed";
+			reg = <112>;
+			regulator-name = "vdd-hdmi-5v0";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+			enable-active-high;
+		};
+
+		p3509_vdd_sys_en: regulator@113 {
+			compatible = "regulator-fixed";
+			reg = <113>;
+			regulator-name = "vdd_sys_en";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			enable-active-high;
+		};
+
+		vdd_1v8_ap: regulator@201 {
+			compatible = "regulator-fixed";
+			reg = <201>;
+			regulator-name = "vdd-1v8-ap";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+			regulator-boot-on;
+		};
+
+		hdr40_vdd_5v0: battery_reg: regulator@202 {
+			compatible = "regulator-fixed";
+			reg = <202>;
+			regulator-name = "vdd-ac-bat";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+			regulator-always-on;
+		};
+
+		vdd_disp_3v3: regulator@203 {
+			compatible = "regulator-fixed";
+			reg = <203>;
+			regulator-name = "vdd-3v3-disp-cvb";
+			regulator-min-microvolt = <3300000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		vdd_bl_en: regulator@204 {
+			compatible = "regulator-fixed-sync";
+			reg = <204>;
+			regulator-name = "vdd-sys-bl";
+			regulator-min-microvolt = <3300000>;
+			regulator-max-microvolt = <3300000>;
+		};
+	};
+
+	tegra_pmc_iopower: pmc-iopower {
+		compatible = "nvidia,tegra186-pmc-iopower";
+		pad-controllers = <&pmc TEGRA_IO_PAD_GROUP_UFS
+					TEGRA_IO_PAD_GROUP_DBG
+					TEGRA_IO_PAD_GROUP_SPI
+					TEGRA_IO_PAD_GROUP_AUDIO_HV
+					TEGRA_IO_PAD_GROUP_AO_HV
+					TEGRA_IO_PAD_GROUP_DMIC_HV
+					TEGRA_IO_PAD_GROUP_SDMMC1_HV
+					TEGRA_IO_PAD_GROUP_SDMMC2_HV
+					TEGRA_IO_PAD_GROUP_SDMMC3_HV
+					TEGRA_IO_PAD_GROUP_DSI
+					TEGRA_IO_PAD_GROUP_DSIB
+					TEGRA_IO_PAD_GROUP_DSIC
+					TEGRA_IO_PAD_GROUP_DSID
+					TEGRA_IO_PAD_GROUP_HDMI_DP0
+					TEGRA_IO_PAD_GROUP_HDMI_DP1>;
+		pad-names = "ufs", "dbg", "spi", "audio-hv", "ao-hv",
+			    "dmic-hv", "sdmmc1-hv", "sdmmc2-hv", "sdmmc3-hv",
+			    "dsia", "dsib", "dsic", "dsid", "hdmi-dp0", "hdmi-dp1";
+
+		vddio-sys-supply = <&vdd_1v8_ap>;
+		vddio-uart-supply = <&vdd_1v8_ap>;
+		vddio-conn-supply = <&vdd_1v8_ap>;
+		vddio-edp-supply = <&vdd_1v8_ap>;
+		vddio-pex-cntrl-supply = <&vdd_1v8_ap>;
+		vddio-audio-supply = <&vdd_1v8_ap>;
+		vddio-ufs-supply = <&vdd_1v8_ap>;
+		vddio-ddr0-supply = <&spmic_sd0>;
+		vddio-ddr1-supply = <&spmic_sd0>;
+		vddio-mipi-bias-supply = <&spmic_sd1>;
+		vddio-cam-supply = <&vdd_1v8_ap>;
+		vddio-sdmmc4-supply = <&vdd_1v8_ap>;
+		vddio-sdmmc1-hv-supply = <&spmic_ldo3>;
+		vddio-audio-hv-supply = <&vdd_1v8_ap>;
+		vddio-dbg-supply = <&vdd_1v8_ap>;
+		vddio-spi-supply = <&vdd_1v8_ap>;
+		vddio-ao-supply = <&vdd_1v8_ap>;
+		vddio-ao-hv-supply = <&spmic_ldo2>;
+		vddio-dmic-hv-supply = <&vdd_1v8_ap>;
+		vddio-sdmmc2-hv-supply = <&spmic_sd3>;
+		vddio-sdmmc3-hv-supply = <&spmic_ldo5>;
+		status = "okay";
+	};
+};
+
+&{/ethernet@2490000} {
+	vddio_sys_enet_bias-supply = <&spmic_sd2>;
+	vddio_enet-supply = <&spmic_sd3>;
+	phy_vdd_1v8-supply = <&spmic_sd2>;
+	phy_ovdd_rgmii-supply = <&spmic_sd3>;
+	phy_pllvdd-supply = <&spmic_sd1>;
+};
+
+&tegra_vi {
+	avdd_dsi_csi-supply = <&spmic_sd1>;
+};
+
+&tegra_nvcsi {
+	nvidia,csi_regulator = "avdd_dsi_csi";
+};
+
+&sdmmc1 {
+	vqmmc-supply = <&spmic_ldo3>;
+	vmmc-supply = <&spmic_sd2>;
+};
+
+&sdmmc2 {
+	vqmmc-supply = <&spmic_sd2>;
+	vmmc-supply = <&spmic_sd3>;
+};
+
+&sdmmc3 {
+	vqmmc-supply = <&spmic_ldo5>;
+	vmmc-supply = <&spmic_sd2>;
+};
+
+&{/usb@3530000} {
+	avddio_usb-supply = <&spmic_sd3>;
+	avdd_pll_utmip-supply = <&spmic_sd2>;
+	hvdd_usb-supply = <&spmic_sd2>;
+};
+
+&padctl {
+	avdd-usb-supply = <&spmic_sd3>;
+	vclamp-usb-supply = <&spmic_sd2>;
+	avdd-pll-erefeut-supply = <&spmic_sd2>;
+	vddio-hsic-supply = <&battery_reg>;
+
+	ports {
+		usb2-0 { vbus-supply = <&battery_reg>; };
+		usb2-1 { vbus-supply = <&battery_reg>; };
+		usb2-2 { vbus-supply = <&battery_reg>; };
+	};
+};
+
+&{/pcie@10003000} {
+	dvdd-pex-supply = <&spmic_ldo7>;
+	hvdd-pex-pll-supply = <&spmic_sd2>;
+	hvdd-pex-supply = <&spmic_sd2>;
+	vddio-pexctl-aud-supply = <&spmic_sd2>;
+};
+
+&pwm_fan {
+	vdd-fan-supply = <&p3509_vdd_fan>;
+};
+
+&head0_legacy {
+	vdd-dp-pwr-supply = <&battery_reg>;
+	avdd-dp-pll-supply = <&battery_reg>;
+	vdd-edp-sec-mode-supply = <&battery_reg>;
+	vdd-dp-pad-supply = <&battery_reg>;
+	avdd_hdmi-supply = <&spmic_ldo7>;
+	avdd_hdmi_pll-supply = <&spmic_sd2>;
+	vdd_hdmi_5v0-supply = <&p3509_vdd_hdmi_5v0>;
+	avdd_lcd-supply = <&vdd_disp_3v3>;
+	dvdd_lcd-supply = <&vdd_1v8_ap>;
+	avdd_dsi_csi-supply = <&spmic_sd1>;
+	vdd_lcd_bl-supply = <&battery_reg>;
+	vdd_lcd_bl_en-supply = <&vdd_bl_en>;
+};
+
+&head1_legacy {
+	vdd-dp-pwr-supply = <&battery_reg>;
+	avdd-dp-pll-supply = <&battery_reg>;
+	vdd-edp-sec-mode-supply = <&battery_reg>;
+	vdd-dp-pad-supply = <&battery_reg>;
+	avdd_hdmi-supply = <&spmic_ldo7>;
+	avdd_hdmi_pll-supply = <&spmic_sd2>;
+	vdd_hdmi_5v0-supply = <&p3509_vdd_hdmi_5v0>;
+	avdd_lcd-supply = <&vdd_disp_3v3>;
+	dvdd_lcd-supply = <&vdd_1v8_ap>;
+	avdd_dsi_csi-supply = <&spmic_sd1>;
+	vdd_lcd_bl-supply = <&battery_reg>;
+	vdd_lcd_bl_en-supply = <&vdd_bl_en>;
+};
+
+&head2_legacy {
+	vdd-dp-pwr-supply = <&battery_reg>;
+	avdd-dp-pll-supply = <&battery_reg>;
+	vdd-edp-sec-mode-supply = <&battery_reg>;
+	vdd-dp-pad-supply = <&battery_reg>;
+	avdd_hdmi-supply = <&spmic_ldo7>;
+	avdd_hdmi_pll-supply = <&spmic_sd2>;
+	vdd_hdmi_5v0-supply = <&p3509_vdd_hdmi_5v0>;
+	avdd_lcd-supply = <&vdd_disp_3v3>;
+	dvdd_lcd-supply = <&vdd_1v8_ap>;
+	avdd_dsi_csi-supply = <&spmic_sd1>;
+	vdd_lcd_bl-supply = <&battery_reg>;
+	vdd_lcd_bl_en-supply = <&vdd_bl_en>;
+};

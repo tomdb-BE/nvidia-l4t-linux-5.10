@@ -4766,6 +4766,19 @@ static int tegra_pcie_suspend_late(struct device *dev)
 	if (list_empty(&pcie->ports))
 		return 0;
 
+	/*
+	 * Tegra186 AFI can raise legacy/error interrupts while the controller
+	 * is torn down in suspend_noirq.  If the shared PCIe PME IRQ is armed
+	 * as a wake source for a downstream device, those controller-generated
+	 * interrupts are seen by the PM core as wake events and abort CPU
+	 * offlining before SC7 entry.
+	 *
+	 * NVIDIA's 4.9 T186 driver masked AFI interrupts in suspend_late for
+	 * this reason.  Do the same here, before the noirq teardown starts.
+	 */
+	if (of_device_is_compatible(dev->of_node, "nvidia,tegra186-pcie"))
+		tegra_pcie_disable_interrupts(pcie);
+
 	if (gpio_is_valid(pcie->pex_wake))
 		enable_irq_wake(gpio_to_irq(pcie->pex_wake));
 
